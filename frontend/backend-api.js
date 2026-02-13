@@ -32,9 +32,10 @@ export class ApiError extends Error {
 }
 
 /**
- * Base URL for API requests (uses Vite proxy in development)
+ * Base URL for API requests
+ * Empty string = same-origin (production: single container, development: Vite proxy)
  */
-const API_BASE = 'http://localhost:3001';
+const API_BASE = '';
 
 /**
  * Default headers for JSON API requests

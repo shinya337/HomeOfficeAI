@@ -13,6 +13,12 @@ import {
 } from './device-list.js';
 import { startSession as apiStartSession, endSession as apiEndSession } from './backend-api.js';
 import { createSessionController } from './session-controller.js';
+import { createModeDisplayUI, updateModeDisplay, resetModeDisplay } from './mode-display.js';
+import {
+  extractModeFromResult,
+  extractUserStateFromResult,
+  extractReasonFromResult,
+} from './app-mode-integration.js';
 
 // 6つの背景テーマ
 const THEMES = [
@@ -30,6 +36,14 @@ let selectedDevices = [];
 
 // SessionController
 let sessionController = null;
+
+// Mode Display
+let modeDisplayElement = null;
+let currentMode = 'idle';
+
+// 仮眠→覚醒フェーズ切替タイマー
+let napWakeTimerId = null;
+const NAP_DURATION_MS = 120000; // 2分
 
 // 状態
 const state = {
@@ -103,6 +117,9 @@ function init() {
 
   // 設定UIを更新
   updateSettingsUI();
+
+  // モード表示UIを初期化
+  initModeDisplay();
 
   // 初期ログ
   addLog('system', 'HomeOffice.ai 起動');
@@ -212,6 +229,8 @@ async function beginSession() {
         const message = result.result?.message || result.actionResult?.message || '';
         console.log('[HomeOffice.ai] 分析結果:', toolName, message);
         addLog('focus', `AI: ${toolName}`);
+        // モード表示を更新
+        handleModeUpdate(result);
         // Web Speech API でモード音声通知
         handleSpeechTexts(result);
       },
@@ -275,6 +294,18 @@ async function stopWork() {
   elements.avatarStatus.textContent = 'タップで開始';
   elements.timerDisplay.classList.add('hidden');
   elements.miniPopup.classList.add('hidden');
+
+  // 仮眠→覚醒タイマーをキャンセル
+  if (napWakeTimerId) {
+    clearTimeout(napWakeTimerId);
+    napWakeTimerId = null;
+  }
+
+  // モード表示をリセット
+  if (modeDisplayElement) {
+    resetModeDisplay(modeDisplayElement);
+    currentMode = 'idle';
+  }
 
   addLog('end', `作業終了 (${elapsed})`);
 }
@@ -488,6 +519,45 @@ function handleAvatarUpload(event) {
 }
 
 // =============================================================================
+// Mode Display — AIモード表示の統合
+// =============================================================================
+
+/**
+ * モード表示UIを初期化してコンテナに追加する
+ */
+function initModeDisplay() {
+  const container = document.getElementById('modeDisplayContainer');
+  if (!container) return;
+
+  modeDisplayElement = createModeDisplayUI();
+  container.appendChild(modeDisplayElement);
+}
+
+/**
+ * 分析結果からモード情報を抽出してモード表示を更新する
+ * @param {object} result - analyze API のレスポンス
+ */
+function handleModeUpdate(result) {
+  if (!modeDisplayElement) return;
+
+  const mode = extractModeFromResult(result);
+  if (!mode) return;
+
+  const previousMode = currentMode;
+  currentMode = mode;
+
+  const userState = extractUserStateFromResult(mode);
+  const reason = extractReasonFromResult(result);
+
+  updateModeDisplay(modeDisplayElement, {
+    currentMode: mode,
+    userState,
+    reason,
+    previousMode,
+  });
+}
+
+// =============================================================================
 // Web Speech API — IoTなし環境向けフォールバック音声通知
 // =============================================================================
 
@@ -511,10 +581,18 @@ function speak(text, lang = 'ja-JP') {
 /**
  * 分析結果から speechTexts を検出し、順番に音声再生する
  * Alexaの音声再生が有効な場合はバックエンドがAlexaで再生するためスキップ
+ * wake_mode時は仮眠→覚醒のフェーズ分け再生を行う
  * @param {object} result - analyze API のレスポンス
  */
 function handleSpeechTexts(result) {
   if (state.alexaSpeechEnabled) {
+    return;
+  }
+
+  // wake_mode: フェーズ分け再生（仮眠アナウンス → 2分後 → 覚醒アナウンス）
+  const primaryTool = result.action?.tool;
+  if (primaryTool === 'wake_mode') {
+    handlePhasedWakeMode(result);
     return;
   }
 
@@ -531,6 +609,47 @@ function handleSpeechTexts(result) {
     for (const text of result.result.speechTexts) {
       speak(text);
     }
+  }
+}
+
+/**
+ * wake_mode のフェーズ分け処理
+ * Phase 1: 仮眠アナウンス（即時）
+ * Phase 2: 覚醒アナウンス（NAP_DURATION_MS後）+ モード表示を覚醒に切替
+ * @param {object} result - analyze API のレスポンス
+ */
+function handlePhasedWakeMode(result) {
+  const allResults = result.results || [];
+  const speechTexts = allResults[0]?.speechTexts || result.result?.speechTexts || [];
+
+  // Phase 1: 仮眠アナウンス（最初のテキストのみ）
+  if (speechTexts.length > 0) {
+    speak(speechTexts[0]);
+  }
+
+  // Phase 2: 覚醒アナウンス（2分後）
+  if (speechTexts.length > 1) {
+    if (napWakeTimerId) {
+      clearTimeout(napWakeTimerId);
+    }
+
+    napWakeTimerId = setTimeout(() => {
+      speak(speechTexts[1]);
+
+      // モード表示を仮眠→覚醒に切替
+      if (modeDisplayElement) {
+        const previousMode = currentMode;
+        currentMode = 'wake';
+        updateModeDisplay(modeDisplayElement, {
+          currentMode: 'wake',
+          userState: '作業中',
+          reason: '仮眠終了',
+          previousMode,
+        });
+      }
+
+      napWakeTimerId = null;
+    }, NAP_DURATION_MS);
   }
 }
 

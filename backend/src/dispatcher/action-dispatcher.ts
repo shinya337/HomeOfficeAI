@@ -890,109 +890,115 @@ export function createActionDispatcher(
             const wakeResults: string[] = [];
             const wakeErrors: string[] = [];
 
-            // === Phase 1: 仮眠フェーズ ===
-
-            // Sub-action 1: Light → off
             const wakeLightId = resolveLightId();
-            if (wakeLightId && deps.lightService) {
-              try {
-                const lightResult = await deps.lightService.control(wakeLightId, 'off');
-                if (lightResult.success) {
-                  wakeResults.push('照明をOFFに変更');
-                } else {
-                  wakeErrors.push(`照明エラー: ${lightResult.error.message}`);
-                }
-              } catch (e) {
-                wakeErrors.push(`照明エラー: ${e instanceof Error ? e.message : 'Unknown error'}`);
-              }
-            }
-
-            // Sub-action 2: BGM停止
             const wakeAlexaId = resolveAlexaId();
-            if (wakeAlexaId && deps.alexaService) {
-              await delay(SUB_ACTION_DELAY_MS);
+            const hasIoTDevices = !!(wakeLightId && deps.lightService) || !!(wakeAlexaId && deps.alexaService);
 
-              try {
-                const stopResult = await deps.alexaService.textCommand(wakeAlexaId, '音楽を止めて');
-                if (stopResult.success) {
-                  wakeResults.push('BGMを停止');
-                } else {
-                  wakeErrors.push(`BGM停止エラー: ${stopResult.error.message}`);
+            if (hasIoTDevices) {
+              // === Phase 1: 仮眠フェーズ (IoTデバイスあり) ===
+
+              // Sub-action 1: Light → off
+              if (wakeLightId && deps.lightService) {
+                try {
+                  const lightResult = await deps.lightService.control(wakeLightId, 'off');
+                  if (lightResult.success) {
+                    wakeResults.push('照明をOFFに変更');
+                  } else {
+                    wakeErrors.push(`照明エラー: ${lightResult.error.message}`);
+                  }
+                } catch (e) {
+                  wakeErrors.push(`照明エラー: ${e instanceof Error ? e.message : 'Unknown error'}`);
                 }
-              } catch (e) {
-                wakeErrors.push(`BGM停止エラー: ${e instanceof Error ? e.message : 'Unknown error'}`);
               }
 
-              // Sub-action 3: 仮眠アナウンス
-              await delay(SUB_ACTION_DELAY_MS);
+              // Sub-action 2: BGM停止
+              if (wakeAlexaId && deps.alexaService) {
+                await delay(SUB_ACTION_DELAY_MS);
 
-              try {
-                const napSpeakResult = await deps.alexaService.speak(wakeAlexaId, '仮眠モードに入ります。2分後に起こします。');
-                if (napSpeakResult.success) {
-                  wakeResults.push('仮眠アナウンスを再生');
-                } else {
-                  wakeErrors.push(`仮眠アナウンスエラー: ${napSpeakResult.error.message}`);
+                try {
+                  const stopResult = await deps.alexaService.textCommand(wakeAlexaId, '音楽を止めて');
+                  if (stopResult.success) {
+                    wakeResults.push('BGMを停止');
+                  } else {
+                    wakeErrors.push(`BGM停止エラー: ${stopResult.error.message}`);
+                  }
+                } catch (e) {
+                  wakeErrors.push(`BGM停止エラー: ${e instanceof Error ? e.message : 'Unknown error'}`);
                 }
-              } catch (e) {
-                wakeErrors.push(`仮眠アナウンスエラー: ${e instanceof Error ? e.message : 'Unknown error'}`);
-              }
-            }
 
-            // === 2分間待機 ===
-            await delay(NAP_DURATION_MS);
+                // Sub-action 3: 仮眠アナウンス
+                await delay(SUB_ACTION_DELAY_MS);
 
-            // === Phase 2: 覚醒フェーズ ===
-
-            // Sub-action 4: Light → on-100 (全灯)
-            if (wakeLightId && deps.lightService) {
-              try {
-                const lightOnResult = await deps.lightService.control(wakeLightId, 'on-100');
-                if (lightOnResult.success) {
-                  wakeResults.push('照明を全灯に変更');
-                } else {
-                  wakeErrors.push(`照明全灯エラー: ${lightOnResult.error.message}`);
+                try {
+                  const napSpeakResult = await deps.alexaService.speak(wakeAlexaId, '仮眠モードに入ります。2分後に起こします。');
+                  if (napSpeakResult.success) {
+                    wakeResults.push('仮眠アナウンスを再生');
+                  } else {
+                    wakeErrors.push(`仮眠アナウンスエラー: ${napSpeakResult.error.message}`);
+                  }
+                } catch (e) {
+                  wakeErrors.push(`仮眠アナウンスエラー: ${e instanceof Error ? e.message : 'Unknown error'}`);
                 }
-              } catch (e) {
-                wakeErrors.push(`照明全灯エラー: ${e instanceof Error ? e.message : 'Unknown error'}`);
-              }
-            }
-
-            // Sub-action 5: 覚醒アナウンス
-            if (wakeAlexaId && deps.alexaService) {
-              await delay(SUB_ACTION_DELAY_MS);
-
-              try {
-                const wakeSpeakResult = await deps.alexaService.speak(wakeAlexaId, '起きてストレッチしましょう。');
-                if (wakeSpeakResult.success) {
-                  wakeResults.push('覚醒アナウンスを再生');
-                } else {
-                  wakeErrors.push(`覚醒アナウンスエラー: ${wakeSpeakResult.error.message}`);
-                }
-              } catch (e) {
-                wakeErrors.push(`覚醒アナウンスエラー: ${e instanceof Error ? e.message : 'Unknown error'}`);
               }
 
-              // Sub-action 6: 覚醒BGM
-              await delay(SPEAK_WAIT_MS);
+              // === 2分間待機 (IoTデバイスあり時のみ) ===
+              await delay(NAP_DURATION_MS);
 
-              try {
-                const bgmResult = await deps.alexaService.textCommand(wakeAlexaId, '元気が出る音楽をかけて');
-                if (bgmResult.success) {
-                  wakeResults.push('覚醒BGMを再生');
-                } else {
-                  wakeErrors.push(`覚醒BGMエラー: ${bgmResult.error.message}`);
+              // === Phase 2: 覚醒フェーズ (IoTデバイスあり) ===
+
+              // Sub-action 4: Light → on-100 (全灯)
+              if (wakeLightId && deps.lightService) {
+                try {
+                  const lightOnResult = await deps.lightService.control(wakeLightId, 'on-100');
+                  if (lightOnResult.success) {
+                    wakeResults.push('照明を全灯に変更');
+                  } else {
+                    wakeErrors.push(`照明全灯エラー: ${lightOnResult.error.message}`);
+                  }
+                } catch (e) {
+                  wakeErrors.push(`照明全灯エラー: ${e instanceof Error ? e.message : 'Unknown error'}`);
                 }
-              } catch (e) {
-                wakeErrors.push(`覚醒BGMエラー: ${e instanceof Error ? e.message : 'Unknown error'}`);
+              }
+
+              // Sub-action 5: 覚醒アナウンス
+              if (wakeAlexaId && deps.alexaService) {
+                await delay(SUB_ACTION_DELAY_MS);
+
+                try {
+                  const wakeSpeakResult = await deps.alexaService.speak(wakeAlexaId, '起きてストレッチしましょう。');
+                  if (wakeSpeakResult.success) {
+                    wakeResults.push('覚醒アナウンスを再生');
+                  } else {
+                    wakeErrors.push(`覚醒アナウンスエラー: ${wakeSpeakResult.error.message}`);
+                  }
+                } catch (e) {
+                  wakeErrors.push(`覚醒アナウンスエラー: ${e instanceof Error ? e.message : 'Unknown error'}`);
+                }
+
+                // Sub-action 6: 覚醒BGM
+                await delay(SPEAK_WAIT_MS);
+
+                try {
+                  const bgmResult = await deps.alexaService.textCommand(wakeAlexaId, '元気が出る音楽をかけて');
+                  if (bgmResult.success) {
+                    wakeResults.push('覚醒BGMを再生');
+                  } else {
+                    wakeErrors.push(`覚醒BGMエラー: ${bgmResult.error.message}`);
+                  }
+                } catch (e) {
+                  wakeErrors.push(`覚醒BGMエラー: ${e instanceof Error ? e.message : 'Unknown error'}`);
+                }
               }
             }
 
             // 実行詳細はログに出力
-            console.log(`[ActionDispatcher] wake_mode 実行結果: ${wakeResults.join(', ') || 'なし'}${wakeErrors.length > 0 ? ` | エラー: ${wakeErrors.join('; ')}` : ''}`);
+            console.log(`[ActionDispatcher] wake_mode 実行結果: ${wakeResults.join(', ') || 'なし'}${wakeErrors.length > 0 ? ` | エラー: ${wakeErrors.join('; ')}` : ''} | IoT: ${hasIoTDevices}`);
 
             return ok<ActionResult>({
               executed: true,
-              nextInterval: 'normal',
+              // IoTなし: フロントエンドが仮眠→覚醒のタイミングを制御
+              // IoTあり: サーバー側で2分待機済み、通常間隔で次の分析
+              nextInterval: hasIoTDevices ? 'normal' : 'nap',
               message: action.params.reason || '覚醒モードを開始しました',
               speechTexts: ['仮眠モードに入ります。2分後に起こします。', '起きてストレッチしましょう。'],
             });

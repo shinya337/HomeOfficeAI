@@ -1,6 +1,9 @@
 import express, { Express, Request, Response } from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createSessionRoutes } from './handlers/session-handler.js';
 import { createAnalyzeRoutes, type AnalyzeHandlerDependencies } from './handlers/analyze-handler.js';
 import { createDeviceRoutes, createDeviceCache, type DeviceCache } from './handlers/device-handler.js';
@@ -176,36 +179,41 @@ export function getAnalyzeHandler(): AnalyzeHandlerService | null {
 
     const config = configResult.value;
 
-    // Create dependencies
-    // 1. Create Nature Remo client chain
-    const rateLimitMonitor = createRateLimitMonitor();
-    const natureRemoClient = createNatureRemoClient(
-      config.agentConfig.natureRemoToken,
-      rateLimitMonitor
-    );
-    const applianceService = createApplianceService(natureRemoClient);
-
-    // 2. Get AlexaService if available (Task 5.1, Req 1.3, 9.2)
-    const alexaService = getAlexaService();
-
-    // 3. Create DeviceStateService with new allowedDevices support (Req 6.1)
-    const deviceStateService = createDeviceStateService({
-      applianceService,
-      ...(alexaService ? { alexaService } : {}),
-    });
-
-    // 4. Create DynamicToolBuilder for dynamic tool generation (Req 4.1, 4.2)
-    const dynamicToolBuilder = createDynamicToolBuilder();
-
     try {
+      // Create dependencies
+      // 1. Create Nature Remo client chain (optional - IoT features disabled without token)
+      let applianceService: ReturnType<typeof createApplianceService> | null = null;
+      let lightService: ReturnType<typeof createLightService> | null = null;
+      let realAirconService: ReturnType<typeof createAirconService> | null = null;
+
+      try {
+        const rateLimitMonitor = createRateLimitMonitor();
+        const natureRemoClient = createNatureRemoClient(
+          config.agentConfig.natureRemoToken,
+          rateLimitMonitor
+        );
+        applianceService = createApplianceService(natureRemoClient);
+        lightService = createLightService(natureRemoClient);
+        realAirconService = createAirconService(natureRemoClient);
+      } catch {
+        console.warn('[Server] Nature Remo not configured. IoT features disabled, Web Speech API fallback active.');
+      }
+
+      // 2. Get AlexaService if available (Task 5.1, Req 1.3, 9.2)
+      const alexaService = getAlexaService();
+
+      // 3. Create DeviceStateService with new allowedDevices support (Req 6.1)
+      const deviceStateService = createDeviceStateService({
+        ...(applianceService ? { applianceService } : {}),
+        ...(alexaService ? { alexaService } : {}),
+      });
+
+      // 4. Create DynamicToolBuilder for dynamic tool generation (Req 4.1, 4.2)
+      const dynamicToolBuilder = createDynamicToolBuilder();
       const agentClient = createAgentClient(config.agentConfig);
 
-      // 5. Create LightService and AirconService for ActionDispatcher
-      const lightService = createLightService(natureRemoClient);
-      const realAirconService = createAirconService(natureRemoClient);
-
-      // Adapter: bridge real AirconService.updateSettings() to dispatcher's setTemperature()/powerOff()
-      const airconServiceAdapter = {
+      // 5. Create ActionDispatcher (IoT services are optional)
+      const airconServiceAdapter = realAirconService ? {
         async setTemperature(applianceId: string, temperature: number, mode?: string) {
           const settings: { temperature?: string; operation_mode?: string } = {
             temperature: String(temperature),
@@ -213,27 +221,27 @@ export function getAnalyzeHandler(): AnalyzeHandlerService | null {
           if (mode) {
             settings.operation_mode = mode;
           }
-          const result = await realAirconService.updateSettings(applianceId, settings);
+          const result = await realAirconService!.updateSettings(applianceId, settings);
           if (result.success) {
             return { success: true as const, data: { applianceId, temperature } };
           }
           return result;
         },
         async powerOff(applianceId: string) {
-          const result = await realAirconService.updateSettings(applianceId, { button: 'power-off' });
+          const result = await realAirconService!.updateSettings(applianceId, { button: 'power-off' });
           if (result.success) {
             return { success: true as const, data: { applianceId } };
           }
           return result;
         },
-      };
+      } : null;
 
       // ActionDispatcher factory: creates a new dispatcher per-request
       // with session's allowedDevices (Req 7.1, 7.2)
       const actionDispatcherFactory = (allowedDevices: readonly import('./types/device-types.js').AllowedDevice[]) =>
         createActionDispatcher(allowedDevices, {
-          lightService,
-          airconService: airconServiceAdapter,
+          ...(lightService ? { lightService } : {}),
+          ...(airconServiceAdapter ? { airconService: airconServiceAdapter } : {}),
           ...(alexaService ? { alexaService } : {}),
         });
 
@@ -267,17 +275,44 @@ export function setAnalyzeHandler(handler: AnalyzeHandlerService): void {
 }
 
 /**
- * Create and configure Express application
- * Requirements: 5.1, 5.3, 5.4
+ * Resolve CORS allowed origins from ALLOWED_ORIGINS environment variable.
+ * If ALLOWED_ORIGINS is set, parse comma-separated origins.
+ * If not set or empty, return default localhost development ports.
+ * Requirements: 3.4, 3.5, 6.1, 6.2, 6.3, 6.4
  */
-export function createApp(): Express {
+export function resolveAllowedOrigins(): string[] {
+  const envValue = process.env['ALLOWED_ORIGINS'];
+  if (envValue !== undefined && envValue.trim() !== '') {
+    return envValue
+      .split(',')
+      .map((origin) => origin.trim())
+      .filter((origin) => origin !== '');
+  }
+  return ['http://localhost:5173', 'http://localhost:5174'];
+}
+
+/**
+ * Options for createApp
+ */
+export interface CreateAppOptions {
+  /** Path to the frontend build output directory for static file serving.
+   *  When provided and the directory exists, enables static file serving and SPA fallback.
+   *  Requirements: 1.3, 1.4 */
+  frontendDistPath?: string;
+}
+
+/**
+ * Create and configure Express application
+ * Requirements: 5.1, 5.3, 5.4, 1.3, 1.4
+ */
+export function createApp(options?: CreateAppOptions): Express {
   const app = express();
 
-  // CORS configuration - allow requests from frontend (localhost:5173)
-  // Requirement: 5.3
+  // CORS configuration - dynamically resolved from ALLOWED_ORIGINS env var
+  // Requirements: 3.4, 3.5, 6.1, 6.2, 6.3, 6.4
   app.use(
     cors({
-      origin: ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:8080'],
+      origin: resolveAllowedOrigins(),
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
       allowedHeaders: ['Content-Type', 'Authorization'],
     })
@@ -287,8 +322,9 @@ export function createApp(): Express {
   // Requirement: 5.4
   app.use(express.json({ limit: '10mb' }));
 
-  // Health check endpoint
-  app.get('/health', (_req: Request, res: Response) => {
+  // Health check endpoint (moved to /api/health for Cloud Run compatibility)
+  // Requirement: 2.4
+  app.get('/api/health', (_req: Request, res: Response) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
   });
 
@@ -345,6 +381,21 @@ export function createApp(): Express {
     });
   }
 
+  // Static file serving and SPA fallback
+  // Requirements: 1.3, 1.4
+  // Only enabled when frontendDistPath is provided and the directory exists
+  const frontendDistPath = options?.frontendDistPath;
+  if (frontendDistPath !== undefined && fs.existsSync(frontendDistPath)) {
+    // Serve static files from the frontend build output directory
+    app.use(express.static(frontendDistPath));
+
+    // SPA fallback: serve index.html for all non-API routes
+    // This must come after all API routes and static file middleware
+    app.get('*', (_req: Request, res: Response) => {
+      res.sendFile(path.join(frontendDistPath, 'index.html'));
+    });
+  }
+
   return app;
 }
 
@@ -358,10 +409,17 @@ export async function startServer(port: number = 3001): Promise<ReturnType<Expre
   // This ensures the service is ready when the first request arrives.
   await initAlexaService();
 
-  const app = createApp();
+  // Default frontend dist path for production container
+  // Requirements: 1.3, 1.4
+  const currentDir = path.dirname(fileURLToPath(import.meta.url));
+  const defaultFrontendDistPath = path.resolve(currentDir, '..', 'frontend-dist');
+  const app = createApp({ frontendDistPath: defaultFrontendDistPath });
 
   return app.listen(port, () => {
     console.log(`HomeOffice API server running on port ${port}`);
+    if (fs.existsSync(defaultFrontendDistPath)) {
+      console.log(`Serving static files from ${defaultFrontendDistPath}`);
+    }
   });
 }
 

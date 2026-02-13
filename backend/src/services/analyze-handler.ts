@@ -284,9 +284,11 @@ export function createAnalyzeHandler(
               message: dispatchResult.value.message,
               ...(dispatchResult.value.speechTexts ? { speechTexts: dispatchResult.value.speechTexts } : {}),
             });
-            // いずれかが short なら short
+            // いずれかが short なら short、nap なら NAP
             if (dispatchResult.value.nextInterval === 'short') {
               nextIntervalMs = Intervals.CONTINUE_MONITORING;
+            } else if (dispatchResult.value.nextInterval === 'nap') {
+              nextIntervalMs = Intervals.NAP;
             }
           }
         }

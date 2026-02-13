@@ -63,7 +63,7 @@ export interface DeviceStateError {
  * Dependencies for DeviceStateService
  */
 export interface DeviceStateServiceDependencies {
-  readonly applianceService: ApplianceService;
+  readonly applianceService?: ApplianceService;
   readonly alexaService?: AlexaService;
 }
 
@@ -223,20 +223,21 @@ export function createDeviceStateService(
     async getDeviceState(
       allowedDevices: readonly AllowedDevice[] | undefined
     ): Promise<Result<FilteredDeviceState, DeviceStateError>> {
-      // Fetch all appliances from Nature Remo API
-      const apiResult = await applianceService.getAppliances();
-
-      if (!apiResult.success) {
-        return {
-          ok: false,
-          error: {
-            code: 'API_ERROR',
-            message: apiResult.error.message,
-          },
-        };
+      // Fetch all appliances from Nature Remo API (if available)
+      let appliances: import('../../packages/nature-remo/src/types/types.js').Appliance[] = [];
+      if (applianceService) {
+        const apiResult = await applianceService.getAppliances();
+        if (!apiResult.success) {
+          return {
+            ok: false,
+            error: {
+              code: 'API_ERROR',
+              message: apiResult.error.message,
+            },
+          };
+        }
+        appliances = apiResult.data;
       }
-
-      const appliances = apiResult.data;
       // Extract states filtered by allowed devices (Req 6.1, 6.2)
       const light = extractLightState(appliances, allowedDevices);
       const aircon = extractAirconState(appliances, allowedDevices);

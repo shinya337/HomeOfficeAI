@@ -146,4 +146,5 @@ export const ToolNames = {
 export const Intervals = {
   DEFAULT: 30000, // 30 seconds
   CONTINUE_MONITORING: 5000, // 5 seconds
+  NAP: 150000, // 2.5 minutes (2min nap + 30s buffer before next analysis)
 } as const;

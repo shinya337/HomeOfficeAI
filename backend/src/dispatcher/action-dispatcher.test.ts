@@ -2614,7 +2614,7 @@ describe('ActionDispatcher - wake_mode', () => {
     expect(mockLight.control).toHaveBeenCalledWith('test-light-id', 'on-100');
   });
 
-  it('should return success when no devices are available', async () => {
+  it('should return success with nap interval when no devices are available', async () => {
     const emptyDevices: readonly AllowedDevice[] = [];
     const dispatcher = createActionDispatcher(emptyDevices, {});
 
@@ -2623,14 +2623,15 @@ describe('ActionDispatcher - wake_mode', () => {
       params: { reason: '居眠り検出' },
     };
 
-    const promise = dispatcher.dispatch(action);
-    await vi.advanceTimersByTimeAsync(150_000);
-    const result = await promise;
+    // No IoT devices: should resolve immediately (no 2-min delay)
+    const result = await dispatcher.dispatch(action);
 
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.value.executed).toBe(true);
       expect(result.value.message).toBe('居眠り検出');
+      // IoTなし時はフロントエンドにタイミング制御を委ねる
+      expect(result.value.nextInterval).toBe('nap');
     }
   });
 
@@ -2643,9 +2644,8 @@ describe('ActionDispatcher - wake_mode', () => {
       params: {},
     };
 
-    const promise = dispatcher.dispatch(action);
-    await vi.advanceTimersByTimeAsync(150_000);
-    const result = await promise;
+    // No IoT devices: resolves immediately
+    const result = await dispatcher.dispatch(action);
 
     expect(result.ok).toBe(true);
     if (result.ok) {

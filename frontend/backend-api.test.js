@@ -42,13 +42,31 @@ describe('API Client Module', () => {
       const result = await startSession();
 
       expect(mockFetch).toHaveBeenCalledTimes(1);
-      expect(mockFetch).toHaveBeenCalledWith('http://localhost:3001/api/session/start', {
+      expect(mockFetch).toHaveBeenCalledWith('/api/session/start', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
       });
       expect(result).toEqual(mockResponse);
+    });
+
+    it('should use relative URL (empty API_BASE) for same-origin requests', async () => {
+      const mockResponse = {
+        sessionId: 'test-session-origin',
+        status: 'active',
+        startedAt: '2026-02-13T10:00:00.000Z',
+      };
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(mockResponse),
+      });
+
+      await startSession();
+
+      const calledUrl = mockFetch.mock.calls[0][0];
+      expect(calledUrl).toBe('/api/session/start');
+      expect(calledUrl).not.toContain('http://localhost');
     });
 
     it('should return session response with sessionId, status, and startedAt', async () => {
@@ -116,7 +134,7 @@ describe('API Client Module', () => {
       const result = await startSession(allowedDeviceIds);
 
       expect(mockFetch).toHaveBeenCalledTimes(1);
-      expect(mockFetch).toHaveBeenCalledWith('http://localhost:3001/api/session/start', {
+      expect(mockFetch).toHaveBeenCalledWith('/api/session/start', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -165,7 +183,7 @@ describe('API Client Module', () => {
       const result = await startSession();
 
       // Should NOT include body when no allowedDeviceIds provided
-      expect(mockFetch).toHaveBeenCalledWith('http://localhost:3001/api/session/start', {
+      expect(mockFetch).toHaveBeenCalledWith('/api/session/start', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -188,7 +206,7 @@ describe('API Client Module', () => {
 
       const result = await startSession([]);
 
-      expect(mockFetch).toHaveBeenCalledWith('http://localhost:3001/api/session/start', {
+      expect(mockFetch).toHaveBeenCalledWith('/api/session/start', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -215,7 +233,7 @@ describe('API Client Module', () => {
       const result = await endSession();
 
       expect(mockFetch).toHaveBeenCalledTimes(1);
-      expect(mockFetch).toHaveBeenCalledWith('http://localhost:3001/api/session/end', {
+      expect(mockFetch).toHaveBeenCalledWith('/api/session/end', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -277,7 +295,7 @@ describe('API Client Module', () => {
       const result = await analyze(base64Image);
 
       expect(mockFetch).toHaveBeenCalledTimes(1);
-      expect(mockFetch).toHaveBeenCalledWith('http://localhost:3001/api/analyze', {
+      expect(mockFetch).toHaveBeenCalledWith('/api/analyze', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -307,7 +325,7 @@ describe('API Client Module', () => {
       const base64Image = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAUA...';
       await analyze(base64Image);
 
-      expect(mockFetch).toHaveBeenCalledWith('http://localhost:3001/api/analyze', {
+      expect(mockFetch).toHaveBeenCalledWith('/api/analyze', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -337,7 +355,7 @@ describe('API Client Module', () => {
       const rawBase64 = '/9j/4AAQSkZJRgABAQAAAQABAAD...';
       await analyze(rawBase64);
 
-      expect(mockFetch).toHaveBeenCalledWith('http://localhost:3001/api/analyze', {
+      expect(mockFetch).toHaveBeenCalledWith('/api/analyze', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -445,7 +463,7 @@ describe('API Client Module', () => {
       const result = await getDevices();
 
       expect(mockFetch).toHaveBeenCalledTimes(1);
-      expect(mockFetch).toHaveBeenCalledWith('http://localhost:3001/api/devices', {
+      expect(mockFetch).toHaveBeenCalledWith('/api/devices', {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
@@ -557,7 +575,7 @@ describe('API Client Module', () => {
       await getSessionStatus();
 
       expect(mockFetch).toHaveBeenCalledTimes(1);
-      expect(mockFetch).toHaveBeenCalledWith('http://localhost:3001/api/session/status', {
+      expect(mockFetch).toHaveBeenCalledWith('/api/session/status', {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',

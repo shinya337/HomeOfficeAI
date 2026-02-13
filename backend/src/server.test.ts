@@ -1,9 +1,12 @@
 import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
 import request from 'supertest';
 import type { Express } from 'express';
-import { createApp, resetSessionManager, resetAnalyzeHandler, setAnalyzeHandler, getAlexaService, resetAlexaService, initAlexaService } from './server.js';
+import { createApp, resetSessionManager, resetAnalyzeHandler, setAnalyzeHandler, getAlexaService, resetAlexaService, initAlexaService, resolveAllowedOrigins } from './server.js';
 import type { AnalyzeHandlerService, AnalyzeResult, AnalyzeError, Result } from './services/analyze-handler.js';
 import { Intervals } from './types/api-types.js';
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
 
 describe('Express Server', () => {
   let app: Express;
@@ -27,9 +30,65 @@ describe('Express Server', () => {
     resetAlexaService();
   });
 
+  describe('resolveAllowedOrigins (Task 1.1)', () => {
+    let origAllowedOrigins: string | undefined;
+
+    beforeEach(() => {
+      origAllowedOrigins = process.env['ALLOWED_ORIGINS'];
+      delete process.env['ALLOWED_ORIGINS'];
+    });
+
+    afterEach(() => {
+      if (origAllowedOrigins !== undefined) {
+        process.env['ALLOWED_ORIGINS'] = origAllowedOrigins;
+      } else {
+        delete process.env['ALLOWED_ORIGINS'];
+      }
+    });
+
+    it('should return default localhost origins when ALLOWED_ORIGINS is not set', () => {
+      const origins = resolveAllowedOrigins();
+      expect(origins).toEqual(['http://localhost:5173', 'http://localhost:5174']);
+    });
+
+    it('should return default localhost origins when ALLOWED_ORIGINS is empty string', () => {
+      process.env['ALLOWED_ORIGINS'] = '';
+      const origins = resolveAllowedOrigins();
+      expect(origins).toEqual(['http://localhost:5173', 'http://localhost:5174']);
+    });
+
+    it('should parse single origin from ALLOWED_ORIGINS', () => {
+      process.env['ALLOWED_ORIGINS'] = 'https://homeoffice-ai-abc123.run.app';
+      const origins = resolveAllowedOrigins();
+      expect(origins).toEqual(['https://homeoffice-ai-abc123.run.app']);
+    });
+
+    it('should parse multiple comma-separated origins from ALLOWED_ORIGINS', () => {
+      process.env['ALLOWED_ORIGINS'] = 'https://homeoffice-ai-abc123.run.app,http://localhost:5173,http://localhost:5174';
+      const origins = resolveAllowedOrigins();
+      expect(origins).toEqual([
+        'https://homeoffice-ai-abc123.run.app',
+        'http://localhost:5173',
+        'http://localhost:5174',
+      ]);
+    });
+
+    it('should trim whitespace from origins', () => {
+      process.env['ALLOWED_ORIGINS'] = ' https://example.com , http://localhost:5173 ';
+      const origins = resolveAllowedOrigins();
+      expect(origins).toEqual(['https://example.com', 'http://localhost:5173']);
+    });
+
+    it('should filter out empty entries from comma-separated list', () => {
+      process.env['ALLOWED_ORIGINS'] = 'https://example.com,,http://localhost:5173,';
+      const origins = resolveAllowedOrigins();
+      expect(origins).toEqual(['https://example.com', 'http://localhost:5173']);
+    });
+  });
+
   describe('Server Configuration', () => {
     it('should respond to requests', async () => {
-      const response = await request(app).get('/health');
+      const response = await request(app).get('/api/health');
       expect(response.status).toBe(200);
     });
 
@@ -64,13 +123,43 @@ describe('Express Server', () => {
       // CORS origin should not be the malicious site
       expect(response.headers['access-control-allow-origin']).not.toBe('http://malicious-site.com');
     });
+
+    it('should allow CORS from custom ALLOWED_ORIGINS', async () => {
+      const origAllowedOrigins = process.env['ALLOWED_ORIGINS'];
+      process.env['ALLOWED_ORIGINS'] = 'https://homeoffice-ai-abc123.run.app';
+
+      resetSessionManager();
+      resetAnalyzeHandler();
+      resetAlexaService();
+      const customApp = createApp();
+
+      const response = await request(customApp)
+        .options('/api/session/status')
+        .set('Origin', 'https://homeoffice-ai-abc123.run.app')
+        .set('Access-Control-Request-Method', 'GET');
+
+      expect(response.headers['access-control-allow-origin']).toBe('https://homeoffice-ai-abc123.run.app');
+
+      // Restore
+      if (origAllowedOrigins !== undefined) {
+        process.env['ALLOWED_ORIGINS'] = origAllowedOrigins;
+      } else {
+        delete process.env['ALLOWED_ORIGINS'];
+      }
+    });
   });
 
-  describe('Health Check Endpoint', () => {
-    it('should return 200 OK with status', async () => {
-      const response = await request(app).get('/health');
+  describe('Health Check Endpoint (Task 1.2)', () => {
+    it('should return 200 OK with status and timestamp at /api/health', async () => {
+      const response = await request(app).get('/api/health');
       expect(response.status).toBe(200);
       expect(response.body).toHaveProperty('status', 'ok');
+      expect(response.body).toHaveProperty('timestamp');
+    });
+
+    it('should not respond at old /health path', async () => {
+      const response = await request(app).get('/health');
+      expect(response.status).not.toBe(200);
     });
   });
 
@@ -303,6 +392,95 @@ describe('Express Server', () => {
       if (!result.success) {
         expect(result.error.code).toBe('AUTH_ERROR');
       }
+    });
+  });
+
+  describe('Static File Serving and SPA Fallback (Task 1.3)', () => {
+    let tmpDir: string;
+    let staticApp: Express;
+
+    beforeEach(() => {
+      // Create a temporary directory with mock frontend build output
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'homeoffice-static-'));
+      fs.writeFileSync(
+        path.join(tmpDir, 'index.html'),
+        '<!DOCTYPE html><html><body><h1>HomeOffice.ai</h1></body></html>'
+      );
+      fs.writeFileSync(
+        path.join(tmpDir, 'test-asset.js'),
+        'console.log("test");'
+      );
+      // Create a subdirectory with a CSS file
+      fs.mkdirSync(path.join(tmpDir, 'assets'));
+      fs.writeFileSync(
+        path.join(tmpDir, 'assets', 'styles.css'),
+        'body { margin: 0; }'
+      );
+
+      resetSessionManager();
+      resetAnalyzeHandler();
+      resetAlexaService();
+      process.env['ALEXA_COOKIE_FILE_PATH'] = '/tmp/non-existent-alexa-cookie-test.json';
+      staticApp = createApp({ frontendDistPath: tmpDir });
+    });
+
+    afterEach(() => {
+      // Clean up temporary directory
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+      resetAnalyzeHandler();
+      resetAlexaService();
+    });
+
+    it('should serve index.html at root path when static directory exists', async () => {
+      const response = await request(staticApp).get('/');
+      expect(response.status).toBe(200);
+      expect(response.text).toContain('HomeOffice.ai');
+      expect(response.headers['content-type']).toMatch(/html/);
+    });
+
+    it('should serve static JS files', async () => {
+      const response = await request(staticApp).get('/test-asset.js');
+      expect(response.status).toBe(200);
+      expect(response.text).toContain('console.log');
+    });
+
+    it('should serve static files in subdirectories', async () => {
+      const response = await request(staticApp).get('/assets/styles.css');
+      expect(response.status).toBe(200);
+      expect(response.text).toContain('body');
+    });
+
+    it('should fallback to index.html for unknown paths (SPA support)', async () => {
+      const response = await request(staticApp).get('/some/unknown/route');
+      expect(response.status).toBe(200);
+      expect(response.text).toContain('HomeOffice.ai');
+      expect(response.headers['content-type']).toMatch(/html/);
+    });
+
+    it('should prioritize API routes over static file serving', async () => {
+      const response = await request(staticApp).get('/api/health');
+      expect(response.status).toBe(200);
+      expect(response.body).toHaveProperty('status', 'ok');
+      expect(response.body).toHaveProperty('timestamp');
+      // Should be JSON, not HTML
+      expect(response.headers['content-type']).toMatch(/json/);
+    });
+
+    it('should not serve static files when frontendDistPath is not provided', async () => {
+      const noStaticApp = createApp();
+      const response = await request(noStaticApp).get('/some/unknown/route');
+      // Without static serving, unknown routes should return 404
+      expect(response.status).toBe(404);
+    });
+
+    it('should not interfere with API echo endpoint', async () => {
+      const response = await request(staticApp)
+        .post('/api/echo')
+        .send({ message: 'hello' })
+        .set('Content-Type', 'application/json');
+
+      expect(response.status).toBe(200);
+      expect(response.body.received).toHaveProperty('message', 'hello');
     });
   });
 });

@@ -310,7 +310,7 @@ export type AgentAction =
 /**
  * Next monitoring interval
  */
-export type NextInterval = 'normal' | 'short';
+export type NextInterval = 'normal' | 'short' | 'nap';
 
 /**
  * Result of action execution
