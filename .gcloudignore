@@ -1,0 +1,26 @@
+# Node modules
+node_modules/
+
+# Build output
+dist/
+backend/dist/
+frontend/dist/
+
+# Environment files
+.env
+.env.*
+!.env.example
+!.env.production
+
+# Version control
+.git/
+
+# IDE
+.vscode/
+.idea/
+
+# Kiro spec files
+.kiro/
+
+# OS files
+.DS_Store

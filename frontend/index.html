@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HomeOffice.ai - Virtual Coworking Space</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- オフィス空間（常時表示） -->
+  <div class="office-space" id="officeSpace">
+    <!-- 背景画像（6テーマからランダム） -->
+    <div class="office-background" id="officeBackground">
+      <img id="bgImage" src="" alt="Virtual Office">
+    </div>
+
+    <!-- Terminal Zone - ターミナル風ログ表示 -->
+    <div class="terminal-zone" id="terminalZone">
+      <div class="terminal">
+        <div class="terminal-header">
+          <span class="terminal-title">~/homeoffice.log</span>
+        </div>
+        <div class="terminal-body">
+          <ul class="terminal-logs" id="terminalLogs"></ul>
+          <div class="terminal-cursor"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Avatar Zone - 自分のアイコン（中央下） -->
+    <div class="avatar-zone" id="avatarZone">
+      <button class="avatar" id="avatarButton" aria-label="仕事を始める">
+        <div class="avatar-image" id="avatarImage">
+          <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="50" cy="35" r="25" fill="#6b7280"/>
+            <ellipse cx="50" cy="85" rx="35" ry="25" fill="#6b7280"/>
+          </svg>
+        </div>
+      </button>
+      <span class="avatar-status" id="avatarStatus">タップで開始</span>
+      <!-- Mode Display Area - AIモード表示 -->
+      <div id="modeDisplayContainer"></div>
+    </div>
+
+    <!-- Timer Display（左下） -->
+    <div class="timer-display hidden" id="timerDisplay">
+      <div class="timer-time" id="timerTime">00:00:00</div>
+    </div>
+
+    <!-- Settings Button -->
+    <button class="settings-button" id="settingsButton" aria-label="設定">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>
+        <circle cx="12" cy="12" r="3"/>
+      </svg>
+    </button>
+  </div>
+
+  <!-- ミニポップアップ（他アプリ使用時） -->
+  <div class="mini-popup hidden" id="miniPopup">
+    <div class="mini-timer" id="miniTimer">00:00:00</div>
+    <button class="mini-expand" id="miniExpand" aria-label="展開">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+        <path d="M2 2h5v2H4v3H2V2zm7 0h5v5h-2V4H9V2zM4 11v-3H2v5h5v-2H4zm8-3v3h-3v2h5v-5h-2z"/>
+      </svg>
+    </button>
+  </div>
+
+  <!-- 許可リクエストモーダル -->
+  <div class="modal hidden" id="permissionModal">
+    <div class="modal-card">
+      <div class="modal-icon" id="permissionIcon"></div>
+      <h2 class="modal-title" id="permissionTitle"></h2>
+      <p class="modal-description" id="permissionDescription"></p>
+      <div class="modal-actions">
+        <button class="modal-button secondary" id="permissionSkip">スキップ</button>
+        <button class="modal-button primary" id="permissionAllow">許可する</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 設定モーダル -->
+  <div class="modal hidden" id="settingsModal">
+    <div class="modal-card settings-card">
+      <div class="modal-header">
+        <h2 class="modal-title">設定</h2>
+        <button class="modal-close" id="settingsClose" aria-label="閉じる">&times;</button>
+      </div>
+      <div class="settings-content">
+        <div class="settings-section">
+          <h3 class="settings-section-title">アクセス許可</h3>
+          <div class="settings-item">
+            <div class="settings-item-info">
+              <span class="settings-item-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></svg></span>
+              <div>
+                <div class="settings-item-label">カメラ</div>
+                <div class="settings-item-desc">集中状態の自動検知に使用</div>
+              </div>
+            </div>
+            <label class="ios-toggle">
+              <input type="checkbox" id="cameraToggle">
+              <span class="ios-toggle-slider"></span>
+            </label>
+          </div>
+          <div class="settings-item">
+            <div class="settings-item-info">
+              <span class="settings-item-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg></span>
+              <div>
+                <div class="settings-item-label">音声通知</div>
+                <div class="settings-item-desc">AIからの音声フィードバック</div>
+              </div>
+            </div>
+            <label class="ios-toggle">
+              <input type="checkbox" id="voiceToggle">
+              <span class="ios-toggle-slider"></span>
+            </label>
+          </div>
+        </div>
+        <div class="settings-guest-hint" id="guestLoginHint">
+          <p class="settings-guest-hint-text">Nature RemoやAlexaとの連携には、<br>ログインが必要です。<br><br>アカウントごとにAPIキーや設定を保存します。</p>
+          <button class="settings-guest-login-button" id="guestLoginButton">
+            <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
+            Googleでログイン
+          </button>
+        </div>
+        <div id="credentialSettingsContainer"></div>
+        <div class="settings-section" id="deviceListSection">
+          <h3 class="settings-section-title">AIに操作を許可するデバイス</h3>
+          <div id="deviceListContainer"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- カメラ映像（非表示、キャプチャ用） -->
+  <video id="cameraVideo" autoplay playsinline style="display:none;"></video>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

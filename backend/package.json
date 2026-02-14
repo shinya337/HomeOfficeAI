@@ -1,0 +1,44 @@
+{
+  "name": "homeoffice-backend",
+  "version": "0.1.0",
+  "description": "HomeOffice.ai REST API server for frontend-backend integration",
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/server.ts",
+    "dev": "tsx watch src/server.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc -p tsconfig.build.json"
+  },
+  "keywords": [
+    "homeoffice",
+    "express",
+    "rest-api",
+    "vertex-ai",
+    "iot"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@types/cors": "^2.8.0",
+    "@types/express": "^4.17.0",
+    "@types/node": "^20.0.0",
+    "@types/supertest": "^6.0.0",
+    "supertest": "^7.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0",
+    "vitest": "^2.0.0"
+  },
+  "dependencies": {
+    "@google-cloud/vertexai": "^1.10.0",
+    "@paralleldrive/cuid2": "^2.3.0",
+    "cors": "^2.8.0",
+    "dotenv": "^16.0.0",
+    "express": "^4.21.0",
+    "firebase-admin": "^13.6.1",
+    "http-proxy-middleware": "^3.0.5"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

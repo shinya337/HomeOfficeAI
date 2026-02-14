@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Documentation (generated)
+docs/
+
+# Environment / secrets
+.env
+.env.local
+.alexa-cookie.json
+
+# Test images (private)
+test-images/
+test-images-sleepy/
+
+# Analysis reports (generated)
+.reports/
+
+# Logs
+*.log
+npm-debug.log*
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# AI tool config (local only)
+CLAUDE.md
+.claude
+.kiro/

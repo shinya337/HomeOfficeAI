@@ -1,0 +1,38 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // =====================================================================
+    // Helper Functions
+    // =====================================================================
+
+    // Check if the request is from an authenticated user who owns this uid
+    function isOwner(uid) {
+      return request.auth != null && request.auth.uid == uid;
+    }
+
+    // =====================================================================
+    // users/{uid} - User profile documents
+    // =====================================================================
+    //
+    // Only the authenticated owner can read/write their own user document.
+    // Admin SDK bypasses these rules; this is defensive protection against
+    // direct client SDK access.
+
+    match /users/{uid} {
+      allow read, write: if isOwner(uid);
+
+      // =================================================================
+      // users/{uid}/credentials/{credentialId} - IoT credentials
+      // =================================================================
+      //
+      // Only the authenticated owner can read/write their own credentials.
+      // Credentials contain encrypted IoT tokens (Nature Remo, etc.).
+
+      match /credentials/{credentialId} {
+        allow read, write: if isOwner(uid);
+      }
+    }
+  }
+}

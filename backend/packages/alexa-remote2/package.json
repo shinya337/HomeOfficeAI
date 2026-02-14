@@ -1,0 +1,32 @@
+{
+  "name": "alexa-remote2",
+  "version": "0.1.0",
+  "description": "Amazon Echo (Alexa) control for HomeOffice.ai via alexa-remote2",
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "alexa",
+    "alexa-remote2",
+    "iot",
+    "homeoffice"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0",
+    "vitest": "^2.0.0"
+  },
+  "dependencies": {
+    "alexa-remote2": "^8.0.4",
+    "dotenv": "^16.0.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

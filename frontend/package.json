@@ -1,0 +1,28 @@
+{
+  "name": "homeoffice-ai-frontend",
+  "version": "1.0.0",
+  "description": "HomeOffice.ai Frontend - Agentic AI for Home Office Optimization",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "jsdom": "^27.0.1",
+    "vite": "^5.4.0",
+    "vitest": "^2.1.0"
+  },
+  "keywords": [
+    "homeoffice",
+    "ai",
+    "agentic-ai",
+    "iot"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "firebase": "^12.9.0"
+  }
+}
