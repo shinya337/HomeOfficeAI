@@ -17,18 +17,10 @@ WORKDIR /app/frontend
 COPY frontend/package.json frontend/package-lock.json* ./
 RUN npm ci
 
-# Copy frontend source
+# Copy frontend source (includes .env.production with Firebase config)
 COPY frontend/ ./
 
-# Firebase environment variables for Vite build
-ARG VITE_FIREBASE_API_KEY
-ARG VITE_FIREBASE_AUTH_DOMAIN
-ARG VITE_FIREBASE_PROJECT_ID
-ENV VITE_FIREBASE_API_KEY=${VITE_FIREBASE_API_KEY}
-ENV VITE_FIREBASE_AUTH_DOMAIN=${VITE_FIREBASE_AUTH_DOMAIN}
-ENV VITE_FIREBASE_PROJECT_ID=${VITE_FIREBASE_PROJECT_ID}
-
-# Build frontend (Vite reads VITE_* env vars at build time)
+# Build frontend (Vite reads VITE_* from .env.production at build time)
 RUN npm run build
 
 # ---------------------------------------------------------------------------

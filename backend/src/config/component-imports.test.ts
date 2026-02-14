@@ -12,6 +12,7 @@ import {
   isSameAction,
   isDeviceControlAction,
   createAlexaService,
+  createAlexaRemoteForProxy,
   loadAlexaConfig,
   type AgentClientService,
   type ActionDispatcherService,
@@ -82,6 +83,14 @@ describe('Component Imports', () => {
         expect(result.data.acceptLanguage).toBe('ja-JP');
         expect(typeof result.data.cookieFilePath).toBe('string');
       }
+    });
+
+    it('should export createAlexaRemoteForProxy factory function', () => {
+      expect(typeof createAlexaRemoteForProxy).toBe('function');
+    });
+
+    it('createAlexaRemoteForProxy should accept config parameter', () => {
+      expect(createAlexaRemoteForProxy.length).toBeGreaterThanOrEqual(1);
     });
 
     it('should export AlexaService type', () => {

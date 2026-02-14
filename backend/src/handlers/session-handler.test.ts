@@ -7,7 +7,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import express, { Express, Request, Response, NextFunction } from 'express';
 import request from 'supertest';
-import { createSessionRoutes, type SessionRouteDependencies } from './session-handler.js';
+import { createSessionRoutes, type SessionRouteDependencies, type AlexaServiceFactory } from './session-handler.js';
 import {
   createSessionManager,
   SessionManagerService,
@@ -17,6 +17,7 @@ import type { Device } from '../types/device-types.js';
 import type { CredentialService } from '../services/credential-service.js';
 import type { AuthenticatedUser } from '../types/auth-types.js';
 import type { IoTServiceFactory } from './session-handler.js';
+import type { AlexaServiceForDispatcher } from '../types/session-types.js';
 
 describe('Session Handler', () => {
   let app: Express;
@@ -745,6 +746,592 @@ describe('Session Handler', () => {
         .expect(200);
 
       expect(response.body.status).toBe('active');
+    });
+  });
+
+  /**
+   * Tests for Alexa cookie loading at session start
+   * Task 4.3, Requirements: 4.1, 4.4, 5.2
+   */
+  describe('POST /api/session/start with Alexa cookie loading', () => {
+    const testUser: AuthenticatedUser = {
+      uid: 'alexa-test-uid',
+      email: 'alexa@example.com',
+      displayName: 'Alexa Test User',
+      photoURL: undefined,
+    };
+
+    const mockLightService = {
+      control: vi.fn().mockResolvedValue({ success: true, data: { applianceId: 'light-1', power: 'on' } }),
+      sendNamedSignal: vi.fn().mockResolvedValue({ success: true, data: { applianceId: 'light-1', signalName: 'test', success: true } }),
+    };
+
+    const mockAirconService = {
+      setTemperature: vi.fn().mockResolvedValue({ success: true, data: { applianceId: 'ac-1', temperature: 25 } }),
+      powerOff: vi.fn().mockResolvedValue({ success: true, data: { applianceId: 'ac-1' } }),
+    };
+
+    const mockAlexaService: AlexaServiceForDispatcher = {
+      speak: vi.fn().mockResolvedValue({ success: true, data: { message: 'hello' } }),
+      announce: vi.fn().mockResolvedValue({ success: true, data: { message: 'hello' } }),
+      executeRoutine: vi.fn().mockResolvedValue({ success: true, data: { utterance: 'routine' } }),
+      setVolume: vi.fn().mockResolvedValue({ success: true, data: { volume: 50 } }),
+      textCommand: vi.fn().mockResolvedValue({ success: true, data: { command: 'test' } }),
+      playWeather: vi.fn().mockResolvedValue({ success: true, data: { message: 'weather' } }),
+      playFlashBriefing: vi.fn().mockResolvedValue({ success: true, data: { message: 'briefing' } }),
+      isConnected: vi.fn().mockReturnValue(true),
+    };
+
+    /**
+     * Middleware that simulates auth middleware by setting req.user
+     */
+    function fakeAuthMiddleware(user: AuthenticatedUser | null) {
+      return (req: Request, _res: Response, next: NextFunction) => {
+        (req as unknown as { user: AuthenticatedUser | null }).user = user;
+        next();
+      };
+    }
+
+    it('should fetch Alexa cookie in parallel with Nature Remo token and store AlexaService in session', async () => {
+      const localSessionManager = createSessionManager();
+      const mockCredentialService: CredentialService = {
+        getDecryptedToken: vi.fn()
+          .mockImplementation((_uid: string, service: string) => {
+            if (service === 'nature-remo') {
+              return Promise.resolve({ ok: true, value: 'nature-remo-token' });
+            }
+            if (service === 'alexa') {
+              return Promise.resolve({ ok: true, value: '{"cookie":"data"}' });
+            }
+            return Promise.resolve({ ok: false, error: { code: 'NOT_FOUND', message: 'not found' } });
+          }),
+        saveToken: vi.fn(),
+        getStatus: vi.fn(),
+        deleteToken: vi.fn(),
+        deleteAllForUser: vi.fn(),
+      };
+
+      const mockIoTFactory: IoTServiceFactory = vi.fn().mockResolvedValue({
+        ok: true,
+        value: { lightService: mockLightService, airconService: mockAirconService },
+      });
+
+      const mockAlexaFactory: AlexaServiceFactory = vi.fn().mockResolvedValue({
+        ok: true,
+        value: mockAlexaService,
+      });
+
+      const testApp = express();
+      testApp.use(express.json());
+      testApp.use(fakeAuthMiddleware(testUser));
+      testApp.use('/api/session', createSessionRoutes({
+        sessionManager: localSessionManager,
+        getCachedDevices: () => testDevices,
+        credentialService: mockCredentialService,
+        iotServiceFactory: mockIoTFactory,
+        alexaServiceFactory: mockAlexaFactory,
+      }));
+
+      const response = await request(testApp)
+        .post('/api/session/start')
+        .expect(200);
+
+      expect(response.body.status).toBe('active');
+
+      // Should have called credentialService for both nature-remo and alexa
+      expect(mockCredentialService.getDecryptedToken).toHaveBeenCalledWith('alexa-test-uid', 'nature-remo');
+      expect(mockCredentialService.getDecryptedToken).toHaveBeenCalledWith('alexa-test-uid', 'alexa');
+
+      // Should have called alexaServiceFactory with the cookie JSON
+      expect(mockAlexaFactory).toHaveBeenCalledWith('{"cookie":"data"}');
+
+      // Session should have both Nature Remo and Alexa services
+      const sessionId = response.body.sessionId as string;
+      const iotServices = localSessionManager.getSessionIoTServices(sessionId);
+      expect(iotServices).toBeDefined();
+      expect(iotServices?.lightService).toBe(mockLightService);
+      expect(iotServices?.airconService).toBe(mockAirconService);
+      expect(iotServices?.alexaService).toBe(mockAlexaService);
+    });
+
+    it('should continue session without AlexaService when Alexa cookie is NOT_FOUND', async () => {
+      const localSessionManager = createSessionManager();
+      const mockCredentialService: CredentialService = {
+        getDecryptedToken: vi.fn()
+          .mockImplementation((_uid: string, service: string) => {
+            if (service === 'nature-remo') {
+              return Promise.resolve({ ok: true, value: 'nature-remo-token' });
+            }
+            return Promise.resolve({ ok: false, error: { code: 'NOT_FOUND', message: 'not found' } });
+          }),
+        saveToken: vi.fn(),
+        getStatus: vi.fn(),
+        deleteToken: vi.fn(),
+        deleteAllForUser: vi.fn(),
+      };
+
+      const mockIoTFactory: IoTServiceFactory = vi.fn().mockResolvedValue({
+        ok: true,
+        value: { lightService: mockLightService, airconService: mockAirconService },
+      });
+
+      const mockAlexaFactory: AlexaServiceFactory = vi.fn();
+
+      const testApp = express();
+      testApp.use(express.json());
+      testApp.use(fakeAuthMiddleware(testUser));
+      testApp.use('/api/session', createSessionRoutes({
+        sessionManager: localSessionManager,
+        getCachedDevices: () => testDevices,
+        credentialService: mockCredentialService,
+        iotServiceFactory: mockIoTFactory,
+        alexaServiceFactory: mockAlexaFactory,
+      }));
+
+      const response = await request(testApp)
+        .post('/api/session/start')
+        .expect(200);
+
+      expect(response.body.status).toBe('active');
+
+      // AlexaServiceFactory should NOT be called when cookie not found
+      expect(mockAlexaFactory).not.toHaveBeenCalled();
+
+      // Session should have Nature Remo services but no Alexa
+      const sessionId = response.body.sessionId as string;
+      const iotServices = localSessionManager.getSessionIoTServices(sessionId);
+      expect(iotServices).toBeDefined();
+      expect(iotServices?.lightService).toBe(mockLightService);
+      expect(iotServices?.alexaService).toBeUndefined();
+    });
+
+    it('should continue session without AlexaService when AlexaServiceFactory fails', async () => {
+      const localSessionManager = createSessionManager();
+      const mockCredentialService: CredentialService = {
+        getDecryptedToken: vi.fn()
+          .mockImplementation((_uid: string, service: string) => {
+            if (service === 'nature-remo') {
+              return Promise.resolve({ ok: true, value: 'nature-remo-token' });
+            }
+            if (service === 'alexa') {
+              return Promise.resolve({ ok: true, value: '{"cookie":"data"}' });
+            }
+            return Promise.resolve({ ok: false, error: { code: 'NOT_FOUND', message: 'not found' } });
+          }),
+        saveToken: vi.fn(),
+        getStatus: vi.fn(),
+        deleteToken: vi.fn(),
+        deleteAllForUser: vi.fn(),
+      };
+
+      const mockIoTFactory: IoTServiceFactory = vi.fn().mockResolvedValue({
+        ok: true,
+        value: { lightService: mockLightService, airconService: mockAirconService },
+      });
+
+      const mockAlexaFactory: AlexaServiceFactory = vi.fn().mockResolvedValue({
+        ok: false,
+        error: { code: 'SERVICE_ERROR', message: 'Failed to create AlexaService' },
+      });
+
+      const testApp = express();
+      testApp.use(express.json());
+      testApp.use(fakeAuthMiddleware(testUser));
+      testApp.use('/api/session', createSessionRoutes({
+        sessionManager: localSessionManager,
+        getCachedDevices: () => testDevices,
+        credentialService: mockCredentialService,
+        iotServiceFactory: mockIoTFactory,
+        alexaServiceFactory: mockAlexaFactory,
+      }));
+
+      const response = await request(testApp)
+        .post('/api/session/start')
+        .expect(200);
+
+      expect(response.body.status).toBe('active');
+
+      // Session should proceed without Alexa (non-blocking)
+      const sessionId = response.body.sessionId as string;
+      const iotServices = localSessionManager.getSessionIoTServices(sessionId);
+      expect(iotServices).toBeDefined();
+      expect(iotServices?.lightService).toBe(mockLightService);
+      expect(iotServices?.alexaService).toBeUndefined();
+    });
+
+    it('should store only AlexaService when Nature Remo token is NOT_FOUND but Alexa cookie exists', async () => {
+      const localSessionManager = createSessionManager();
+      const mockCredentialService: CredentialService = {
+        getDecryptedToken: vi.fn()
+          .mockImplementation((_uid: string, service: string) => {
+            if (service === 'alexa') {
+              return Promise.resolve({ ok: true, value: '{"cookie":"data"}' });
+            }
+            return Promise.resolve({ ok: false, error: { code: 'NOT_FOUND', message: 'not found' } });
+          }),
+        saveToken: vi.fn(),
+        getStatus: vi.fn(),
+        deleteToken: vi.fn(),
+        deleteAllForUser: vi.fn(),
+      };
+
+      const mockIoTFactory: IoTServiceFactory = vi.fn();
+
+      const mockAlexaFactory: AlexaServiceFactory = vi.fn().mockResolvedValue({
+        ok: true,
+        value: mockAlexaService,
+      });
+
+      const testApp = express();
+      testApp.use(express.json());
+      testApp.use(fakeAuthMiddleware(testUser));
+      testApp.use('/api/session', createSessionRoutes({
+        sessionManager: localSessionManager,
+        getCachedDevices: () => testDevices,
+        credentialService: mockCredentialService,
+        iotServiceFactory: mockIoTFactory,
+        alexaServiceFactory: mockAlexaFactory,
+      }));
+
+      const response = await request(testApp)
+        .post('/api/session/start')
+        .expect(200);
+
+      expect(response.body.status).toBe('active');
+
+      // Session should have AlexaService even without Nature Remo
+      const sessionId = response.body.sessionId as string;
+      const iotServices = localSessionManager.getSessionIoTServices(sessionId);
+      expect(iotServices).toBeDefined();
+      expect(iotServices?.alexaService).toBe(mockAlexaService);
+      // Nature Remo factory should not be called (token not found)
+      expect(mockIoTFactory).not.toHaveBeenCalled();
+    });
+
+    it('should not call alexaServiceFactory for guest mode', async () => {
+      const mockCredentialService: CredentialService = {
+        getDecryptedToken: vi.fn(),
+        saveToken: vi.fn(),
+        getStatus: vi.fn(),
+        deleteToken: vi.fn(),
+        deleteAllForUser: vi.fn(),
+      };
+
+      const mockIoTFactory: IoTServiceFactory = vi.fn();
+      const mockAlexaFactory: AlexaServiceFactory = vi.fn();
+
+      const testApp = express();
+      testApp.use(express.json());
+      testApp.use(fakeAuthMiddleware(null));
+      testApp.use('/api/session', createSessionRoutes({
+        sessionManager: createSessionManager(),
+        getCachedDevices: () => testDevices,
+        credentialService: mockCredentialService,
+        iotServiceFactory: mockIoTFactory,
+        alexaServiceFactory: mockAlexaFactory,
+      }));
+
+      const response = await request(testApp)
+        .post('/api/session/start')
+        .expect(200);
+
+      expect(response.body.status).toBe('active');
+      expect(mockCredentialService.getDecryptedToken).not.toHaveBeenCalled();
+      expect(mockAlexaFactory).not.toHaveBeenCalled();
+    });
+
+    it('should continue session when AlexaServiceFactory throws an unexpected error', async () => {
+      const localSessionManager = createSessionManager();
+      const mockCredentialService: CredentialService = {
+        getDecryptedToken: vi.fn()
+          .mockImplementation((_uid: string, service: string) => {
+            if (service === 'nature-remo') {
+              return Promise.resolve({ ok: true, value: 'nature-remo-token' });
+            }
+            if (service === 'alexa') {
+              return Promise.resolve({ ok: true, value: '{"cookie":"data"}' });
+            }
+            return Promise.resolve({ ok: false, error: { code: 'NOT_FOUND', message: 'not found' } });
+          }),
+        saveToken: vi.fn(),
+        getStatus: vi.fn(),
+        deleteToken: vi.fn(),
+        deleteAllForUser: vi.fn(),
+      };
+
+      const mockIoTFactory: IoTServiceFactory = vi.fn().mockResolvedValue({
+        ok: true,
+        value: { lightService: mockLightService, airconService: mockAirconService },
+      });
+
+      // Factory throws an unexpected error
+      const mockAlexaFactory: AlexaServiceFactory = vi.fn().mockRejectedValue(
+        new Error('Unexpected connection timeout')
+      );
+
+      const testApp = express();
+      testApp.use(express.json());
+      testApp.use(fakeAuthMiddleware(testUser));
+      testApp.use('/api/session', createSessionRoutes({
+        sessionManager: localSessionManager,
+        getCachedDevices: () => testDevices,
+        credentialService: mockCredentialService,
+        iotServiceFactory: mockIoTFactory,
+        alexaServiceFactory: mockAlexaFactory,
+      }));
+
+      const response = await request(testApp)
+        .post('/api/session/start')
+        .expect(200);
+
+      expect(response.body.status).toBe('active');
+
+      // Session should proceed without Alexa (non-blocking)
+      const sessionId = response.body.sessionId as string;
+      const iotServices = localSessionManager.getSessionIoTServices(sessionId);
+      expect(iotServices).toBeDefined();
+      expect(iotServices?.lightService).toBe(mockLightService);
+      expect(iotServices?.alexaService).toBeUndefined();
+    });
+
+    it('should work without alexaServiceFactory (backward compatibility)', async () => {
+      const localSessionManager = createSessionManager();
+      const mockCredentialService: CredentialService = {
+        getDecryptedToken: vi.fn().mockResolvedValue({
+          ok: true,
+          value: 'nature-remo-token',
+        }),
+        saveToken: vi.fn(),
+        getStatus: vi.fn(),
+        deleteToken: vi.fn(),
+        deleteAllForUser: vi.fn(),
+      };
+
+      const mockIoTFactory: IoTServiceFactory = vi.fn().mockResolvedValue({
+        ok: true,
+        value: { lightService: mockLightService, airconService: mockAirconService },
+      });
+
+      // No alexaServiceFactory provided
+      const testApp = express();
+      testApp.use(express.json());
+      testApp.use(fakeAuthMiddleware(testUser));
+      testApp.use('/api/session', createSessionRoutes({
+        sessionManager: localSessionManager,
+        getCachedDevices: () => testDevices,
+        credentialService: mockCredentialService,
+        iotServiceFactory: mockIoTFactory,
+      }));
+
+      const response = await request(testApp)
+        .post('/api/session/start')
+        .expect(200);
+
+      expect(response.body.status).toBe('active');
+
+      // Session should still work with Nature Remo services
+      const sessionId = response.body.sessionId as string;
+      const iotServices = localSessionManager.getSessionIoTServices(sessionId);
+      expect(iotServices).toBeDefined();
+      expect(iotServices?.lightService).toBe(mockLightService);
+      expect(iotServices?.alexaService).toBeUndefined();
+    });
+
+    it('should continue session when both Nature Remo token NOT_FOUND and Alexa cookie NOT_FOUND', async () => {
+      const localSessionManager = createSessionManager();
+      const mockCredentialService: CredentialService = {
+        getDecryptedToken: vi.fn().mockResolvedValue({
+          ok: false,
+          error: { code: 'NOT_FOUND', message: 'not found' },
+        }),
+        saveToken: vi.fn(),
+        getStatus: vi.fn(),
+        deleteToken: vi.fn(),
+        deleteAllForUser: vi.fn(),
+      };
+
+      const mockIoTFactory: IoTServiceFactory = vi.fn();
+      const mockAlexaFactory: AlexaServiceFactory = vi.fn();
+
+      const testApp = express();
+      testApp.use(express.json());
+      testApp.use(fakeAuthMiddleware(testUser));
+      testApp.use('/api/session', createSessionRoutes({
+        sessionManager: localSessionManager,
+        getCachedDevices: () => testDevices,
+        credentialService: mockCredentialService,
+        iotServiceFactory: mockIoTFactory,
+        alexaServiceFactory: mockAlexaFactory,
+      }));
+
+      const response = await request(testApp)
+        .post('/api/session/start')
+        .expect(200);
+
+      expect(response.body.status).toBe('active');
+      // Neither factory should be called since both tokens are NOT_FOUND
+      expect(mockIoTFactory).not.toHaveBeenCalled();
+      expect(mockAlexaFactory).not.toHaveBeenCalled();
+      // Session should have no IoT services (global fallback)
+      const sessionId = response.body.sessionId as string;
+      const iotServices = localSessionManager.getSessionIoTServices(sessionId);
+      expect(iotServices).toBeUndefined();
+    });
+
+    it('should verify SessionIoTServices has all three properties when both services succeed', async () => {
+      const localSessionManager = createSessionManager();
+      const mockCredentialService: CredentialService = {
+        getDecryptedToken: vi.fn()
+          .mockImplementation((_uid: string, service: string) => {
+            if (service === 'nature-remo') {
+              return Promise.resolve({ ok: true, value: 'remo-token' });
+            }
+            if (service === 'alexa') {
+              return Promise.resolve({ ok: true, value: '{"cookie":"valid"}' });
+            }
+            return Promise.resolve({ ok: false, error: { code: 'NOT_FOUND', message: 'not found' } });
+          }),
+        saveToken: vi.fn(),
+        getStatus: vi.fn(),
+        deleteToken: vi.fn(),
+        deleteAllForUser: vi.fn(),
+      };
+
+      const mockIoTFactory: IoTServiceFactory = vi.fn().mockResolvedValue({
+        ok: true,
+        value: { lightService: mockLightService, airconService: mockAirconService },
+      });
+
+      const mockAlexaFactory: AlexaServiceFactory = vi.fn().mockResolvedValue({
+        ok: true,
+        value: mockAlexaService,
+      });
+
+      const testApp = express();
+      testApp.use(express.json());
+      testApp.use(fakeAuthMiddleware(testUser));
+      testApp.use('/api/session', createSessionRoutes({
+        sessionManager: localSessionManager,
+        getCachedDevices: () => testDevices,
+        credentialService: mockCredentialService,
+        iotServiceFactory: mockIoTFactory,
+        alexaServiceFactory: mockAlexaFactory,
+      }));
+
+      const response = await request(testApp)
+        .post('/api/session/start')
+        .expect(200);
+
+      const sessionId = response.body.sessionId as string;
+      const iotServices = localSessionManager.getSessionIoTServices(sessionId);
+
+      // All three properties of SessionIoTServices should be defined
+      expect(iotServices).toBeDefined();
+      expect(iotServices?.lightService).toBe(mockLightService);
+      expect(iotServices?.airconService).toBe(mockAirconService);
+      expect(iotServices?.alexaService).toBe(mockAlexaService);
+    });
+
+    it('should handle Alexa credential FIRESTORE_ERROR gracefully (continue without AlexaService)', async () => {
+      const localSessionManager = createSessionManager();
+      const mockCredentialService: CredentialService = {
+        getDecryptedToken: vi.fn()
+          .mockImplementation((_uid: string, service: string) => {
+            if (service === 'nature-remo') {
+              return Promise.resolve({ ok: true, value: 'remo-token' });
+            }
+            if (service === 'alexa') {
+              return Promise.resolve({ ok: false, error: { code: 'FIRESTORE_ERROR', message: 'Firestore connection timeout' } });
+            }
+            return Promise.resolve({ ok: false, error: { code: 'NOT_FOUND', message: 'not found' } });
+          }),
+        saveToken: vi.fn(),
+        getStatus: vi.fn(),
+        deleteToken: vi.fn(),
+        deleteAllForUser: vi.fn(),
+      };
+
+      const mockIoTFactory: IoTServiceFactory = vi.fn().mockResolvedValue({
+        ok: true,
+        value: { lightService: mockLightService, airconService: mockAirconService },
+      });
+
+      const mockAlexaFactory: AlexaServiceFactory = vi.fn();
+
+      const testApp = express();
+      testApp.use(express.json());
+      testApp.use(fakeAuthMiddleware(testUser));
+      testApp.use('/api/session', createSessionRoutes({
+        sessionManager: localSessionManager,
+        getCachedDevices: () => testDevices,
+        credentialService: mockCredentialService,
+        iotServiceFactory: mockIoTFactory,
+        alexaServiceFactory: mockAlexaFactory,
+      }));
+
+      const response = await request(testApp)
+        .post('/api/session/start')
+        .expect(200);
+
+      expect(response.body.status).toBe('active');
+      // AlexaFactory should NOT be called when Alexa credential lookup fails
+      expect(mockAlexaFactory).not.toHaveBeenCalled();
+      // Session should have Nature Remo services only
+      const sessionId = response.body.sessionId as string;
+      const iotServices = localSessionManager.getSessionIoTServices(sessionId);
+      expect(iotServices).toBeDefined();
+      expect(iotServices?.lightService).toBe(mockLightService);
+      expect(iotServices?.airconService).toBe(mockAirconService);
+      expect(iotServices?.alexaService).toBeUndefined();
+    });
+
+    it('should call credential lookups for both nature-remo and alexa exactly once each', async () => {
+      const mockCredentialService: CredentialService = {
+        getDecryptedToken: vi.fn()
+          .mockImplementation((_uid: string, service: string) => {
+            if (service === 'nature-remo') {
+              return Promise.resolve({ ok: true, value: 'remo-token' });
+            }
+            if (service === 'alexa') {
+              return Promise.resolve({ ok: true, value: '{"cookie":"data"}' });
+            }
+            return Promise.resolve({ ok: false, error: { code: 'NOT_FOUND', message: 'not found' } });
+          }),
+        saveToken: vi.fn(),
+        getStatus: vi.fn(),
+        deleteToken: vi.fn(),
+        deleteAllForUser: vi.fn(),
+      };
+
+      const mockIoTFactory: IoTServiceFactory = vi.fn().mockResolvedValue({
+        ok: true,
+        value: { lightService: mockLightService, airconService: mockAirconService },
+      });
+
+      const mockAlexaFactory: AlexaServiceFactory = vi.fn().mockResolvedValue({
+        ok: true,
+        value: mockAlexaService,
+      });
+
+      const testApp = express();
+      testApp.use(express.json());
+      testApp.use(fakeAuthMiddleware(testUser));
+      testApp.use('/api/session', createSessionRoutes({
+        sessionManager: createSessionManager(),
+        getCachedDevices: () => testDevices,
+        credentialService: mockCredentialService,
+        iotServiceFactory: mockIoTFactory,
+        alexaServiceFactory: mockAlexaFactory,
+      }));
+
+      await request(testApp)
+        .post('/api/session/start')
+        .expect(200);
+
+      // Verify exactly 2 calls to getDecryptedToken (one for each service)
+      expect(mockCredentialService.getDecryptedToken).toHaveBeenCalledTimes(2);
+      expect(mockCredentialService.getDecryptedToken).toHaveBeenCalledWith('alexa-test-uid', 'nature-remo');
+      expect(mockCredentialService.getDecryptedToken).toHaveBeenCalledWith('alexa-test-uid', 'alexa');
     });
   });
 });

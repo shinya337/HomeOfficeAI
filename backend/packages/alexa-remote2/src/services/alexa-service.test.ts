@@ -34,7 +34,7 @@ vi.mock('node:fs', () => {
 // Import after mocks are set up
 import AlexaRemote from 'alexa-remote2';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { createAlexaService } from './alexa-service.js';
+import { createAlexaService, createAlexaRemoteForProxy } from './alexa-service.js';
 import type { AlexaService } from './alexa-service.js';
 
 // ============================================================================
@@ -2018,6 +2018,144 @@ describe('AlexaService', () => {
         // AUTH_ERROR for disconnected state should not include cause
         expect(result.error.cause).toBeUndefined();
       }
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // Fix 6-fix-1: createAlexaRemoteForProxy - Raw AlexaRemote instance for proxy
+  // --------------------------------------------------------------------------
+
+  describe('createAlexaRemoteForProxy', () => {
+    let mockAlexaRemoteConstructor: ReturnType<typeof vi.fn>;
+    let mockExistsSync: ReturnType<typeof vi.fn>;
+
+    beforeEach(() => {
+      vi.clearAllMocks();
+      mockAlexaRemoteConstructor = vi.mocked(AlexaRemote);
+      mockExistsSync = vi.mocked(existsSync);
+    });
+
+    it('should return an object with on, stopProxyServer, and proxyPort properties', async () => {
+      mockExistsSync.mockReturnValue(false);
+
+      const mockInstance = createMockAlexaRemoteInstance({
+        initError: new Error('proxy mode'),
+      });
+      // Add proxy-specific properties
+      (mockInstance as Record<string, unknown>)['stopProxyServer'] = vi.fn();
+      (mockInstance as Record<string, unknown>)['proxyPort'] = 54321;
+      mockAlexaRemoteConstructor.mockReturnValue(mockInstance);
+
+      const result = await createAlexaRemoteForProxy(
+        createTestConfig({
+          proxyOwnIp: 'localhost',
+          proxyPort: 0,
+        })
+      );
+
+      expect(result).toBeDefined();
+      expect(typeof result.on).toBe('function');
+      expect(typeof result.stopProxyServer).toBe('function');
+      expect(typeof result.proxyPort).toBe('number');
+    });
+
+    it('should call alexa-remote2 init with proxyOnly: true', async () => {
+      mockExistsSync.mockReturnValue(false);
+
+      const mockInstance = createMockAlexaRemoteInstance({
+        initError: new Error('proxy mode'),
+      });
+      (mockInstance as Record<string, unknown>)['stopProxyServer'] = vi.fn();
+      (mockInstance as Record<string, unknown>)['proxyPort'] = 0;
+      mockAlexaRemoteConstructor.mockReturnValue(mockInstance);
+
+      await createAlexaRemoteForProxy(
+        createTestConfig({
+          proxyOwnIp: 'localhost',
+          proxyPort: 0,
+        })
+      );
+
+      expect(mockInstance.init).toHaveBeenCalledTimes(1);
+      const initOptions = mockInstance.init.mock.calls[0]![0] as Record<string, unknown>;
+      expect(initOptions['proxyOnly']).toBe(true);
+      expect(initOptions['proxyOwnIp']).toBe('localhost');
+      expect(initOptions['amazonPage']).toBe('amazon.co.jp');
+      expect(initOptions['acceptLanguage']).toBe('ja-JP');
+    });
+
+    it('should expose the raw on method for registering cookie event listeners', async () => {
+      mockExistsSync.mockReturnValue(false);
+
+      const mockInstance = createMockAlexaRemoteInstance({
+        initError: new Error('proxy mode'),
+      });
+      (mockInstance as Record<string, unknown>)['stopProxyServer'] = vi.fn();
+      (mockInstance as Record<string, unknown>)['proxyPort'] = 0;
+      mockAlexaRemoteConstructor.mockReturnValue(mockInstance);
+
+      const result = await createAlexaRemoteForProxy(
+        createTestConfig({
+          proxyOwnIp: 'localhost',
+          proxyPort: 0,
+        })
+      );
+
+      // Should be able to register a cookie event handler
+      const handler = vi.fn();
+      result.on('cookie', handler);
+
+      // Trigger the event via the mock
+      mockInstance._emit('cookie', { localCookie: 'test' });
+
+      expect(handler).toHaveBeenCalledWith({ localCookie: 'test' });
+    });
+
+    it('should not return the AlexaService wrapper methods (speak, getDevices, etc.)', async () => {
+      mockExistsSync.mockReturnValue(false);
+
+      const mockInstance = createMockAlexaRemoteInstance({
+        initError: new Error('proxy mode'),
+      });
+      (mockInstance as Record<string, unknown>)['stopProxyServer'] = vi.fn();
+      (mockInstance as Record<string, unknown>)['proxyPort'] = 0;
+      mockAlexaRemoteConstructor.mockReturnValue(mockInstance);
+
+      const result = await createAlexaRemoteForProxy(
+        createTestConfig({
+          proxyOwnIp: 'localhost',
+          proxyPort: 0,
+        })
+      );
+
+      // The returned object should NOT have AlexaService wrapper methods
+      const resultAsAny = result as Record<string, unknown>;
+      expect(resultAsAny['speak']).toBeUndefined();
+      expect(resultAsAny['getDevices']).toBeUndefined();
+      expect(resultAsAny['isConnected']).toBeUndefined();
+    });
+
+    it('should use config proxyPort and proxyOwnIp for init options', async () => {
+      mockExistsSync.mockReturnValue(false);
+
+      const mockInstance = createMockAlexaRemoteInstance({
+        initError: new Error('proxy mode'),
+      });
+      (mockInstance as Record<string, unknown>)['stopProxyServer'] = vi.fn();
+      (mockInstance as Record<string, unknown>)['proxyPort'] = 12345;
+      mockAlexaRemoteConstructor.mockReturnValue(mockInstance);
+
+      const result = await createAlexaRemoteForProxy(
+        createTestConfig({
+          proxyOwnIp: '192.168.1.100',
+          proxyPort: 12345,
+        })
+      );
+
+      const initOptions = mockInstance.init.mock.calls[0]![0] as Record<string, unknown>;
+      expect(initOptions['proxyOwnIp']).toBe('192.168.1.100');
+      expect(initOptions['proxyPort']).toBe(12345);
+      expect(result.proxyPort).toBe(12345);
     });
   });
 });

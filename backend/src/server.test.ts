@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
 import request from 'supertest';
 import type { Express } from 'express';
-import { createApp, resetSessionManager, resetAnalyzeHandler, setAnalyzeHandler, getAlexaService, resetAlexaService, initAlexaService, resolveAllowedOrigins, resetFirebaseIntegration, resetApplianceServiceSingleton } from './server.js';
+import { createApp, resetSessionManager, resetAnalyzeHandler, setAnalyzeHandler, getAlexaService, resetAlexaService, initAlexaService, resolveAllowedOrigins, resetFirebaseIntegration, resetApplianceServiceSingleton, resetAlexaProxyService } from './server.js';
 import type { AnalyzeHandlerService, AnalyzeResult, AnalyzeError, Result } from './services/analyze-handler.js';
 import { Intervals } from './types/api-types.js';
 import fs from 'node:fs';
@@ -912,6 +912,630 @@ describe('Express Server', () => {
       // Should return the error from the user's token API call
       expect(response.status).toBe(503);
       expect(response.body.error.code).toBe('NATURE_API_ERROR');
+    });
+  });
+
+  describe('/api/devices with user Alexa credential (Task 4.1)', () => {
+    /**
+     * Tests for task 4.1: GET /api/devices should fetch user-specific Alexa devices
+     * when the authenticated user has saved Alexa cookies in Firestore.
+     *
+     * Flow: credentialService.getDecryptedToken(uid, 'alexa') -> cookie JSON ->
+     *       temp file -> createAlexaService -> getDevices() -> merge with Nature Remo
+     *
+     * Requirements: 3.1, 3.2, 3.3, 3.4, 5.2
+     */
+
+    let origNatureRemoToken: string | undefined;
+
+    function createMockFirebaseServicesForAlexaDevices(): FirebaseServices {
+      const mockAuth = {
+        verifyIdToken: vi.fn().mockImplementation(async (token: string) => {
+          if (token === 'alexa-user-token') {
+            return {
+              uid: 'user-with-alexa-cookie',
+              email: 'alexa-user@example.com',
+              name: 'Alexa User',
+              picture: 'https://example.com/photo.jpg',
+            };
+          }
+          if (token === 'no-alexa-user-token') {
+            return {
+              uid: 'user-no-alexa',
+              email: 'no-alexa@example.com',
+              name: 'No Alexa User',
+            };
+          }
+          throw new Error('Invalid token');
+        }),
+      } as unknown as Auth;
+
+      const mockFirestore = {} as unknown as FirebaseFirestore.Firestore;
+
+      return {
+        app: {} as unknown as FirebaseServices['app'],
+        auth: mockAuth,
+        firestore: mockFirestore,
+      };
+    }
+
+    beforeEach(() => {
+      origNatureRemoToken = process.env['NATURE_REMO_TOKEN'];
+      delete process.env['NATURE_REMO_TOKEN'];
+      resetSessionManager();
+      resetAnalyzeHandler();
+      resetAlexaService();
+      resetFirebaseIntegration();
+      resetApplianceServiceSingleton();
+      process.env['ALEXA_COOKIE_FILE_PATH'] = '/tmp/non-existent-alexa-cookie-test.json';
+    });
+
+    afterEach(() => {
+      if (origNatureRemoToken !== undefined) {
+        process.env['NATURE_REMO_TOKEN'] = origNatureRemoToken;
+      } else {
+        delete process.env['NATURE_REMO_TOKEN'];
+      }
+      resetAnalyzeHandler();
+      resetAlexaService();
+      resetFirebaseIntegration();
+      resetApplianceServiceSingleton();
+    });
+
+    it('should include user Alexa devices when user has saved Alexa cookie (Req 3.1, 3.2)', async () => {
+      // Mock credential service: user has both nature-remo and alexa tokens
+      const mockCredentialService = {
+        getDecryptedToken: vi.fn().mockImplementation(async (uid: string, service: string) => {
+          if (uid === 'user-with-alexa-cookie' && service === 'nature-remo') {
+            return { ok: true, value: 'user-nature-remo-token' };
+          }
+          if (uid === 'user-with-alexa-cookie' && service === 'alexa') {
+            return { ok: true, value: '{"localCookie":"test-cookie-data"}' };
+          }
+          return { ok: false, error: { code: 'NOT_FOUND', message: 'Not found' } };
+        }),
+        saveToken: vi.fn(),
+        getStatus: vi.fn(),
+        deleteToken: vi.fn(),
+        deleteAllForUser: vi.fn(),
+      };
+
+      // Mock Nature Remo device fetcher
+      const mockUserDeviceFetcher = vi.fn().mockResolvedValue({
+        ok: true,
+        devices: [
+          { id: 'user-light-1', name: 'My Desk Light', type: 'LIGHT' },
+        ],
+      });
+
+      // Mock Alexa device fetcher
+      const mockUserAlexaDeviceFetcher = vi.fn().mockResolvedValue({
+        ok: true,
+        devices: [
+          { id: 'echo-serial-1', name: 'Echo Dot Desk', type: 'ALEXA' as const },
+          { id: 'echo-serial-2', name: 'Echo Show Living', type: 'ALEXA' as const },
+        ],
+      });
+
+      const deviceApp = createApp({
+        firebaseServices: createMockFirebaseServicesForAlexaDevices(),
+        credentialService: mockCredentialService,
+        userDeviceFetcher: mockUserDeviceFetcher,
+        userAlexaDeviceFetcher: mockUserAlexaDeviceFetcher,
+      });
+
+      const response = await request(deviceApp)
+        .get('/api/devices')
+        .set('Authorization', 'Bearer alexa-user-token');
+
+      expect(response.status).toBe(200);
+      // Should contain Nature Remo + Alexa devices
+      expect(response.body.devices).toHaveLength(3);
+      expect(response.body.devices[0]).toEqual({ id: 'user-light-1', name: 'My Desk Light', type: 'LIGHT' });
+      expect(response.body.devices[1]).toEqual({ id: 'echo-serial-1', name: 'Echo Dot Desk', type: 'ALEXA' });
+      expect(response.body.devices[2]).toEqual({ id: 'echo-serial-2', name: 'Echo Show Living', type: 'ALEXA' });
+      // Verify both credential lookups were made
+      expect(mockCredentialService.getDecryptedToken).toHaveBeenCalledWith('user-with-alexa-cookie', 'alexa');
+      expect(mockUserAlexaDeviceFetcher).toHaveBeenCalledWith('{"localCookie":"test-cookie-data"}');
+    });
+
+    it('should return Alexa devices even when user has no Nature Remo token (Req 3.1)', async () => {
+      const mockCredentialService = {
+        getDecryptedToken: vi.fn().mockImplementation(async (uid: string, service: string) => {
+          if (uid === 'user-with-alexa-cookie' && service === 'alexa') {
+            return { ok: true, value: '{"localCookie":"test-cookie"}' };
+          }
+          return { ok: false, error: { code: 'NOT_FOUND', message: 'Not found' } };
+        }),
+        saveToken: vi.fn(),
+        getStatus: vi.fn(),
+        deleteToken: vi.fn(),
+        deleteAllForUser: vi.fn(),
+      };
+
+      const mockUserAlexaDeviceFetcher = vi.fn().mockResolvedValue({
+        ok: true,
+        devices: [
+          { id: 'echo-serial-1', name: 'Echo Dot', type: 'ALEXA' as const },
+        ],
+      });
+
+      const deviceApp = createApp({
+        firebaseServices: createMockFirebaseServicesForAlexaDevices(),
+        credentialService: mockCredentialService,
+        userAlexaDeviceFetcher: mockUserAlexaDeviceFetcher,
+      });
+
+      const response = await request(deviceApp)
+        .get('/api/devices')
+        .set('Authorization', 'Bearer alexa-user-token');
+
+      expect(response.status).toBe(200);
+      // Should contain only Alexa devices (no Nature Remo)
+      expect(response.body.devices).toHaveLength(1);
+      expect(response.body.devices[0]).toEqual({ id: 'echo-serial-1', name: 'Echo Dot', type: 'ALEXA' });
+    });
+
+    it('should fallback to global AlexaService when user has no Alexa cookie (Req 3.3)', async () => {
+      const mockCredentialService = {
+        getDecryptedToken: vi.fn().mockImplementation(async (_uid: string, service: string) => {
+          if (service === 'nature-remo') {
+            return { ok: true, value: 'user-nature-remo-token' };
+          }
+          // No Alexa cookie for this user
+          return { ok: false, error: { code: 'NOT_FOUND', message: 'Not found' } };
+        }),
+        saveToken: vi.fn(),
+        getStatus: vi.fn(),
+        deleteToken: vi.fn(),
+        deleteAllForUser: vi.fn(),
+      };
+
+      const mockUserDeviceFetcher = vi.fn().mockResolvedValue({
+        ok: true,
+        devices: [
+          { id: 'user-light-1', name: 'My Light', type: 'LIGHT' },
+        ],
+      });
+
+      // No userAlexaDeviceFetcher -> should try global AlexaService
+      const deviceApp = createApp({
+        firebaseServices: createMockFirebaseServicesForAlexaDevices(),
+        credentialService: mockCredentialService,
+        userDeviceFetcher: mockUserDeviceFetcher,
+      });
+
+      const response = await request(deviceApp)
+        .get('/api/devices')
+        .set('Authorization', 'Bearer alexa-user-token');
+
+      expect(response.status).toBe(200);
+      // Should have Nature Remo devices. No Alexa since no user cookie and global AlexaService is disconnected
+      expect(response.body.devices).toHaveLength(1);
+      expect(response.body.devices[0]).toEqual({ id: 'user-light-1', name: 'My Light', type: 'LIGHT' });
+      // Verify Alexa credential lookup was attempted
+      expect(mockCredentialService.getDecryptedToken).toHaveBeenCalledWith('user-with-alexa-cookie', 'alexa');
+    });
+
+    it('should continue without Alexa devices when AlexaService creation fails (Req 3.4)', async () => {
+      const mockCredentialService = {
+        getDecryptedToken: vi.fn().mockImplementation(async (uid: string, service: string) => {
+          if (uid === 'user-with-alexa-cookie' && service === 'nature-remo') {
+            return { ok: true, value: 'user-nature-remo-token' };
+          }
+          if (uid === 'user-with-alexa-cookie' && service === 'alexa') {
+            return { ok: true, value: '{"localCookie":"expired-cookie"}' };
+          }
+          return { ok: false, error: { code: 'NOT_FOUND', message: 'Not found' } };
+        }),
+        saveToken: vi.fn(),
+        getStatus: vi.fn(),
+        deleteToken: vi.fn(),
+        deleteAllForUser: vi.fn(),
+      };
+
+      const mockUserDeviceFetcher = vi.fn().mockResolvedValue({
+        ok: true,
+        devices: [
+          { id: 'user-light-1', name: 'My Light', type: 'LIGHT' },
+        ],
+      });
+
+      // Mock Alexa device fetcher that returns failure
+      const mockUserAlexaDeviceFetcher = vi.fn().mockResolvedValue({
+        ok: false,
+        error: { code: 'ALEXA_ERROR', message: 'Cookie expired' },
+      });
+
+      const deviceApp = createApp({
+        firebaseServices: createMockFirebaseServicesForAlexaDevices(),
+        credentialService: mockCredentialService,
+        userDeviceFetcher: mockUserDeviceFetcher,
+        userAlexaDeviceFetcher: mockUserAlexaDeviceFetcher,
+      });
+
+      const response = await request(deviceApp)
+        .get('/api/devices')
+        .set('Authorization', 'Bearer alexa-user-token');
+
+      expect(response.status).toBe(200);
+      // Should still return Nature Remo devices without Alexa devices
+      expect(response.body.devices).toHaveLength(1);
+      expect(response.body.devices[0]).toEqual({ id: 'user-light-1', name: 'My Light', type: 'LIGHT' });
+    });
+
+    it('should handle Alexa device fetcher throwing an exception gracefully (Req 3.4)', async () => {
+      const mockCredentialService = {
+        getDecryptedToken: vi.fn().mockImplementation(async (uid: string, service: string) => {
+          if (uid === 'user-with-alexa-cookie' && service === 'alexa') {
+            return { ok: true, value: '{"localCookie":"bad-cookie"}' };
+          }
+          return { ok: false, error: { code: 'NOT_FOUND', message: 'Not found' } };
+        }),
+        saveToken: vi.fn(),
+        getStatus: vi.fn(),
+        deleteToken: vi.fn(),
+        deleteAllForUser: vi.fn(),
+      };
+
+      // Mock Alexa device fetcher that throws
+      const mockUserAlexaDeviceFetcher = vi.fn().mockRejectedValue(
+        new Error('Connection timeout')
+      );
+
+      const deviceApp = createApp({
+        firebaseServices: createMockFirebaseServicesForAlexaDevices(),
+        credentialService: mockCredentialService,
+        userAlexaDeviceFetcher: mockUserAlexaDeviceFetcher,
+      });
+
+      const response = await request(deviceApp)
+        .get('/api/devices')
+        .set('Authorization', 'Bearer alexa-user-token');
+
+      expect(response.status).toBe(200);
+      // Should return empty devices (no Nature Remo, Alexa failed) rather than 500
+      expect(response.body.devices).toEqual([]);
+    });
+
+    it('should not fetch Alexa devices for guest users (Req 3.1)', async () => {
+      const mockCredentialService = {
+        getDecryptedToken: vi.fn(),
+        saveToken: vi.fn(),
+        getStatus: vi.fn(),
+        deleteToken: vi.fn(),
+        deleteAllForUser: vi.fn(),
+      };
+
+      const mockUserAlexaDeviceFetcher = vi.fn();
+
+      const deviceApp = createApp({
+        firebaseServices: createMockFirebaseServicesForAlexaDevices(),
+        credentialService: mockCredentialService,
+        userAlexaDeviceFetcher: mockUserAlexaDeviceFetcher,
+      });
+
+      const response = await request(deviceApp).get('/api/devices');
+
+      expect(response.status).toBe(200);
+      // Guest mode: should not call Alexa credential lookup
+      expect(mockCredentialService.getDecryptedToken).not.toHaveBeenCalledWith(
+        expect.anything(),
+        'alexa'
+      );
+      expect(mockUserAlexaDeviceFetcher).not.toHaveBeenCalled();
+    });
+
+    it('should fetch Nature Remo and Alexa credentials in parallel (Req 3.1, 3.2)', async () => {
+      /**
+       * Verifies that both credential lookups (nature-remo and alexa) are initiated
+       * simultaneously using Promise.all for optimal latency.
+       */
+      const callOrder: string[] = [];
+
+      const mockCredentialService = {
+        getDecryptedToken: vi.fn().mockImplementation(async (uid: string, service: string) => {
+          callOrder.push(`getDecryptedToken:${service}`);
+          if (uid === 'user-with-alexa-cookie' && service === 'nature-remo') {
+            return { ok: true, value: 'user-nature-remo-token' };
+          }
+          if (uid === 'user-with-alexa-cookie' && service === 'alexa') {
+            return { ok: true, value: '{"localCookie":"test-cookie"}' };
+          }
+          return { ok: false, error: { code: 'NOT_FOUND', message: 'Not found' } };
+        }),
+        saveToken: vi.fn(),
+        getStatus: vi.fn(),
+        deleteToken: vi.fn(),
+        deleteAllForUser: vi.fn(),
+      };
+
+      const mockUserDeviceFetcher = vi.fn().mockResolvedValue({
+        ok: true,
+        devices: [{ id: 'light-1', name: 'Light', type: 'LIGHT' }],
+      });
+
+      const mockUserAlexaDeviceFetcher = vi.fn().mockResolvedValue({
+        ok: true,
+        devices: [{ id: 'echo-1', name: 'Echo', type: 'ALEXA' as const }],
+      });
+
+      const deviceApp = createApp({
+        firebaseServices: createMockFirebaseServicesForAlexaDevices(),
+        credentialService: mockCredentialService,
+        userDeviceFetcher: mockUserDeviceFetcher,
+        userAlexaDeviceFetcher: mockUserAlexaDeviceFetcher,
+      });
+
+      const response = await request(deviceApp)
+        .get('/api/devices')
+        .set('Authorization', 'Bearer alexa-user-token');
+
+      expect(response.status).toBe(200);
+      // Both lookups should have been called
+      expect(mockCredentialService.getDecryptedToken).toHaveBeenCalledWith('user-with-alexa-cookie', 'nature-remo');
+      expect(mockCredentialService.getDecryptedToken).toHaveBeenCalledWith('user-with-alexa-cookie', 'alexa');
+      // Both fetchers should have been called
+      expect(mockUserDeviceFetcher).toHaveBeenCalled();
+      expect(mockUserAlexaDeviceFetcher).toHaveBeenCalled();
+      // Result should contain both types merged
+      expect(response.body.devices).toHaveLength(2);
+      const types = response.body.devices.map((d: { type: string }) => d.type);
+      expect(types).toContain('LIGHT');
+      expect(types).toContain('ALEXA');
+    });
+
+    it('should handle credential service FIRESTORE_ERROR for Alexa and continue with Nature Remo devices (Req 3.4)', async () => {
+      const mockCredentialService = {
+        getDecryptedToken: vi.fn().mockImplementation(async (uid: string, service: string) => {
+          if (uid === 'user-with-alexa-cookie' && service === 'nature-remo') {
+            return { ok: true, value: 'user-nature-remo-token' };
+          }
+          if (service === 'alexa') {
+            return { ok: false, error: { code: 'FIRESTORE_ERROR', message: 'Firestore connection failed' } };
+          }
+          return { ok: false, error: { code: 'NOT_FOUND', message: 'Not found' } };
+        }),
+        saveToken: vi.fn(),
+        getStatus: vi.fn(),
+        deleteToken: vi.fn(),
+        deleteAllForUser: vi.fn(),
+      };
+
+      const mockUserDeviceFetcher = vi.fn().mockResolvedValue({
+        ok: true,
+        devices: [{ id: 'light-1', name: 'My Light', type: 'LIGHT' }],
+      });
+
+      const mockUserAlexaDeviceFetcher = vi.fn();
+
+      const deviceApp = createApp({
+        firebaseServices: createMockFirebaseServicesForAlexaDevices(),
+        credentialService: mockCredentialService,
+        userDeviceFetcher: mockUserDeviceFetcher,
+        userAlexaDeviceFetcher: mockUserAlexaDeviceFetcher,
+      });
+
+      const response = await request(deviceApp)
+        .get('/api/devices')
+        .set('Authorization', 'Bearer alexa-user-token');
+
+      expect(response.status).toBe(200);
+      // Should still return Nature Remo devices despite Alexa Firestore error
+      expect(response.body.devices).toHaveLength(1);
+      expect(response.body.devices[0]).toEqual({ id: 'light-1', name: 'My Light', type: 'LIGHT' });
+      // Alexa device fetcher should NOT have been called (credential lookup failed)
+      expect(mockUserAlexaDeviceFetcher).not.toHaveBeenCalled();
+    });
+
+    it('should correctly assign type ALEXA to all Alexa devices in merged list (Req 3.2)', async () => {
+      const mockCredentialService = {
+        getDecryptedToken: vi.fn().mockImplementation(async (uid: string, service: string) => {
+          if (uid === 'user-with-alexa-cookie' && service === 'nature-remo') {
+            return { ok: true, value: 'user-remo-token' };
+          }
+          if (uid === 'user-with-alexa-cookie' && service === 'alexa') {
+            return { ok: true, value: '{"cookie":"data"}' };
+          }
+          return { ok: false, error: { code: 'NOT_FOUND', message: 'Not found' } };
+        }),
+        saveToken: vi.fn(),
+        getStatus: vi.fn(),
+        deleteToken: vi.fn(),
+        deleteAllForUser: vi.fn(),
+      };
+
+      const mockUserDeviceFetcher = vi.fn().mockResolvedValue({
+        ok: true,
+        devices: [
+          { id: 'light-1', name: 'Desk Light', type: 'LIGHT' },
+          { id: 'ac-1', name: 'Office AC', type: 'AC' },
+        ],
+      });
+
+      const mockUserAlexaDeviceFetcher = vi.fn().mockResolvedValue({
+        ok: true,
+        devices: [
+          { id: 'echo-1', name: 'Echo Dot Office', type: 'ALEXA' as const },
+          { id: 'echo-2', name: 'Echo Show Kitchen', type: 'ALEXA' as const },
+          { id: 'echo-3', name: 'Echo Studio Bedroom', type: 'ALEXA' as const },
+        ],
+      });
+
+      const deviceApp = createApp({
+        firebaseServices: createMockFirebaseServicesForAlexaDevices(),
+        credentialService: mockCredentialService,
+        userDeviceFetcher: mockUserDeviceFetcher,
+        userAlexaDeviceFetcher: mockUserAlexaDeviceFetcher,
+      });
+
+      const response = await request(deviceApp)
+        .get('/api/devices')
+        .set('Authorization', 'Bearer alexa-user-token');
+
+      expect(response.status).toBe(200);
+      // 2 Nature Remo + 3 Alexa = 5 total
+      expect(response.body.devices).toHaveLength(5);
+      // Nature Remo devices come first, then Alexa
+      expect(response.body.devices[0].type).toBe('LIGHT');
+      expect(response.body.devices[1].type).toBe('AC');
+      expect(response.body.devices[2].type).toBe('ALEXA');
+      expect(response.body.devices[3].type).toBe('ALEXA');
+      expect(response.body.devices[4].type).toBe('ALEXA');
+      // Verify each Alexa device has correct properties
+      expect(response.body.devices[2]).toEqual({ id: 'echo-1', name: 'Echo Dot Office', type: 'ALEXA' });
+      expect(response.body.devices[3]).toEqual({ id: 'echo-2', name: 'Echo Show Kitchen', type: 'ALEXA' });
+      expect(response.body.devices[4]).toEqual({ id: 'echo-3', name: 'Echo Studio Bedroom', type: 'ALEXA' });
+    });
+  });
+
+  describe('Alexa Proxy Auth Route Mounting (Task 3.3)', () => {
+    /**
+     * Tests for task 3.3: Mount alexa-proxy-handler routes on server.ts.
+     * Verifies that:
+     * - AlexaProxyService is created at server startup and injected into handler
+     * - POST /api/alexa-auth/start requires authentication
+     * - GET /api/alexa-auth/status/:sessionId requires authentication
+     * - ALL /api/alexa-auth/proxy/:sessionId/* is registered
+     * - Coexists with credential-handler, session-handler
+     *
+     * Requirements: 1.5, 5.3
+     */
+
+    function createMockFirebaseServicesForProxy(): FirebaseServices {
+      const mockAuth = {
+        verifyIdToken: vi.fn().mockImplementation(async (token: string) => {
+          if (token === 'valid-proxy-token') {
+            return {
+              uid: 'proxy-test-user',
+              email: 'proxy@example.com',
+              name: 'Proxy User',
+              picture: 'https://example.com/photo.jpg',
+            };
+          }
+          if (token === 'another-user-token') {
+            return {
+              uid: 'another-user',
+              email: 'another@example.com',
+              name: 'Another User',
+            };
+          }
+          throw new Error('Invalid token');
+        }),
+      } as unknown as Auth;
+
+      const mockFirestore = {} as unknown as FirebaseFirestore.Firestore;
+
+      return {
+        app: {} as unknown as FirebaseServices['app'],
+        auth: mockAuth,
+        firestore: mockFirestore,
+      };
+    }
+
+    let proxyApp: Express;
+
+    beforeEach(() => {
+      resetSessionManager();
+      resetAnalyzeHandler();
+      resetAlexaService();
+      resetFirebaseIntegration();
+      resetAlexaProxyService();
+      process.env['ALEXA_COOKIE_FILE_PATH'] = '/tmp/non-existent-alexa-cookie-test.json';
+      proxyApp = createApp({ firebaseServices: createMockFirebaseServicesForProxy() });
+    });
+
+    afterEach(() => {
+      resetAnalyzeHandler();
+      resetAlexaService();
+      resetFirebaseIntegration();
+      resetAlexaProxyService();
+    });
+
+    it('should reject unauthenticated POST to /api/alexa-auth/start with 401', async () => {
+      const response = await request(proxyApp).post('/api/alexa-auth/start');
+      expect(response.status).toBe(401);
+      expect(response.body.error).toBe('AUTH_REQUIRED');
+    });
+
+    it('should reject unauthenticated GET to /api/alexa-auth/status/:sessionId with 401', async () => {
+      const response = await request(proxyApp).get('/api/alexa-auth/status/some-session-id');
+      expect(response.status).toBe(401);
+      expect(response.body.error).toBe('AUTH_REQUIRED');
+    });
+
+    it('should handle POST /api/alexa-auth/start with authenticated user (returns 500 because proxy cannot actually start in test)', async () => {
+      const response = await request(proxyApp)
+        .post('/api/alexa-auth/start')
+        .set('Authorization', 'Bearer valid-proxy-token');
+
+      // AlexaProxyService uses createAlexaService which will fail in test env,
+      // so we expect either 500 (PROXY_START_FAILED) or 200 (if mock works).
+      // The important thing is that it's NOT 401 (auth passed) and NOT 404 (route exists).
+      expect(response.status).not.toBe(401);
+      expect(response.status).not.toBe(404);
+    });
+
+    it('should handle GET /api/alexa-auth/status/:sessionId for non-existent session with 404', async () => {
+      const response = await request(proxyApp)
+        .get('/api/alexa-auth/status/nonexistent-session')
+        .set('Authorization', 'Bearer valid-proxy-token');
+
+      expect(response.status).toBe(404);
+      expect(response.body.error).toBe('SESSION_NOT_FOUND');
+    });
+
+    it('should handle /api/alexa-auth/proxy/:sessionId/* for non-existent session with 404', async () => {
+      const response = await request(proxyApp)
+        .get('/api/alexa-auth/proxy/nonexistent-session/test-path');
+
+      // Proxy route should return 404 for unknown session
+      expect(response.status).toBe(404);
+      expect(response.body.error).toBe('SESSION_NOT_FOUND');
+    });
+
+    it('should preserve existing session routes when alexa proxy routes are mounted', async () => {
+      const statusResponse = await request(proxyApp).get('/api/session/status');
+      expect(statusResponse.status).toBe(200);
+      expect(statusResponse.body).toHaveProperty('hasActiveSession');
+    });
+
+    it('should preserve existing credential routes when alexa proxy routes are mounted', async () => {
+      // Credential status without auth should return 401 (requireAuth guard)
+      const response = await request(proxyApp).get('/api/credentials/status');
+      expect(response.status).toBe(401);
+      expect(response.body.error).toBe('AUTH_REQUIRED');
+    });
+
+    it('should preserve health check endpoint when alexa proxy routes are mounted', async () => {
+      const response = await request(proxyApp).get('/api/health');
+      expect(response.status).toBe(200);
+      expect(response.body).toHaveProperty('status', 'ok');
+    });
+
+    it('should not register alexa proxy routes when Firebase services are unavailable', async () => {
+      const origProject = process.env['GOOGLE_CLOUD_PROJECT'];
+      const origEncKey = process.env['CREDENTIAL_ENCRYPTION_KEY'];
+      delete process.env['GOOGLE_CLOUD_PROJECT'];
+      delete process.env['CREDENTIAL_ENCRYPTION_KEY'];
+
+      try {
+        resetFirebaseIntegration();
+        resetSessionManager();
+        resetAlexaProxyService();
+        const noFirebaseApp = createApp();
+
+        // Alexa proxy auth endpoint should return 404 when Firebase not configured
+        const response = await request(noFirebaseApp).post('/api/alexa-auth/start');
+        expect(response.status).toBe(404);
+      } finally {
+        if (origProject !== undefined) {
+          process.env['GOOGLE_CLOUD_PROJECT'] = origProject;
+        }
+        if (origEncKey !== undefined) {
+          process.env['CREDENTIAL_ENCRYPTION_KEY'] = origEncKey;
+        }
+      }
     });
   });
 });

@@ -23,6 +23,7 @@ import {
 } from './config/index.js';
 import {
   createAlexaService,
+  createAlexaRemoteForProxy,
   loadAlexaConfig,
   type AlexaService,
 } from './config/component-imports.js';
@@ -35,6 +36,11 @@ import { createCredentialRoutes } from './handlers/credential-handler.js';
 import { createCredentialService, type CredentialService } from './services/credential-service.js';
 import { createEncryptionService } from './services/encryption-service.js';
 import { loadCredentialEncryptionKey } from './config/credential-env.js';
+// Alexa Proxy Auth integration (Task 3.3, Requirements: 1.5, 5.3)
+import { createAlexaProxyRoutes } from './handlers/alexa-proxy-handler.js';
+import { createAlexaReverseProxyMiddleware } from './middleware/alexa-reverse-proxy.js';
+import { createAlexaProxyService, type CreateAlexaProxyServiceDeps } from './services/alexa-proxy-service.js';
+import type { AlexaProxyService as AlexaProxyServiceType } from './types/alexa-proxy-types.js';
 
 // Load environment variables
 dotenv.config();
@@ -42,6 +48,7 @@ dotenv.config();
 // Types for user device fetching (Task 10.2-fix-1)
 import type { Device } from './types/device-types.js';
 import type { AuthenticatedUser } from './types/auth-types.js';
+import type { Result } from './types/action-types.js';
 
 /**
  * Callback to fetch devices using a user's Nature Remo token.
@@ -54,6 +61,19 @@ export type UserDeviceFetcher = (
 ) => Promise<
   | { ok: true; devices: readonly Device[] }
   | { ok: false; error: { code: string; message: string; retryAfter?: number } }
+>;
+
+/**
+ * Callback to fetch Alexa devices using a user's Alexa cookie JSON.
+ * Returns Device[] with type: 'ALEXA'.
+ *
+ * Task 4.1 Requirements: 3.1, 3.2, 3.3, 3.4
+ */
+export type UserAlexaDeviceFetcher = (
+  cookieJson: string
+) => Promise<
+  | { ok: true; devices: readonly Device[] }
+  | { ok: false; error: { code: string; message: string } }
 >;
 
 /**
@@ -117,6 +137,7 @@ let sharedApplianceService: ApplianceService | null = null;
 let sharedAlexaService: AlexaService | null = null;
 let alexaServiceInitPromise: Promise<AlexaService> | null = null;
 let sharedCredentialService: CredentialService | null = null;
+let sharedAlexaProxyService: AlexaProxyServiceType | null = null;
 
 /**
  * Get or create the shared session manager instance
@@ -259,6 +280,38 @@ export function resetApplianceServiceSingleton(): void {
 }
 
 /**
+ * Reset the AlexaProxyService singleton (useful for testing).
+ * Task 3.3 Requirements: 1.5, 5.3
+ */
+export function resetAlexaProxyService(): void {
+  sharedAlexaProxyService = null;
+}
+
+/**
+ * Get or create the shared AlexaProxyService instance.
+ * Requires a CredentialService for cookie storage.
+ * Returns null if credentialService is not available.
+ *
+ * Task 3.3 Requirements: 1.5, 5.3
+ */
+function getOrCreateAlexaProxyService(
+  credentialService: CredentialService
+): AlexaProxyServiceType {
+  if (sharedAlexaProxyService !== null) {
+    return sharedAlexaProxyService;
+  }
+
+  const deps: CreateAlexaProxyServiceDeps = {
+    credentialService,
+    createAlexaRemoteForProxyFn: createAlexaRemoteForProxy,
+  };
+
+  sharedAlexaProxyService = createAlexaProxyService(deps);
+  console.log('[Server] AlexaProxyService initialized');
+  return sharedAlexaProxyService;
+}
+
+/**
  * Get or create the shared analyze handler instance
  * This lazy-loads the handler with all required dependencies
  */
@@ -342,7 +395,7 @@ export function getAnalyzeHandler(): AnalyzeHandlerService | null {
         createActionDispatcher(allowedDevices, {
           ...(sessionIoTServices?.lightService ?? lightService ? { lightService: sessionIoTServices?.lightService ?? lightService! } : {}),
           ...(sessionIoTServices?.airconService ?? airconServiceAdapter ? { airconService: sessionIoTServices?.airconService ?? airconServiceAdapter! } : {}),
-          ...(alexaService ? { alexaService } : {}),
+          ...(sessionIoTServices?.alexaService ?? alexaService ? { alexaService: sessionIoTServices?.alexaService ?? alexaService! } : {}),
         });
 
       sharedAnalyzeHandler = createAnalyzeHandler({
@@ -459,6 +512,10 @@ export interface CreateAppOptions {
    *  When provided with credentialService, enables user-specific device lists.
    *  Task 10.2-fix-1 */
   userDeviceFetcher?: UserDeviceFetcher;
+  /** Callback to fetch Alexa devices using a user's Alexa cookie JSON.
+   *  When provided with credentialService, enables user-specific Alexa device lists.
+   *  Task 4.1 Requirements: 3.1, 3.2, 3.3, 3.4 */
+  userAlexaDeviceFetcher?: UserAlexaDeviceFetcher;
 }
 
 /**
@@ -482,6 +539,7 @@ export function createApp(options?: CreateAppOptions): Express {
   // Requirement: 5.4
   app.use(express.json({ limit: '10mb' }));
 
+
   // Firebase Auth middleware integration (Task 6.1, Requirements: 3.5, 4.4)
   // Apply optional auth middleware to all /api routes when Firebase is available
   const firebaseServices = options?.firebaseServices ?? tryInitializeFirebaseServices();
@@ -498,6 +556,13 @@ export function createApp(options?: CreateAppOptions): Express {
     const credentialService = getOrCreateCredentialService(firebaseServices);
     if (credentialService !== null) {
       app.use('/api/credentials', requireAuth, createCredentialRoutes({ credentialService }));
+
+      // Register Alexa Proxy auth routes (Task 3.3, Requirements: 1.5, 5.3)
+      // Reverse proxy must be mounted BEFORE requireAuth-protected routes
+      // because popup windows may not carry auth tokens (sessionId-based validation instead)
+      const alexaProxyService = getOrCreateAlexaProxyService(credentialService);
+      app.use('/api/alexa-auth/proxy/:sessionId', createAlexaReverseProxyMiddleware({ alexaProxyService }));
+      app.use('/api/alexa-auth', requireAuth, createAlexaProxyRoutes({ alexaProxyService }));
     }
 
     console.log('[Server] Firebase Auth middleware enabled on /api routes');
@@ -520,12 +585,44 @@ export function createApp(options?: CreateAppOptions): Express {
 
   // Session API routes
   // Requirements: 1.2, 1.4, 1.6, 5.5, 3.1, 3.2, 3.4
+  // Task 4.3: Wire alexaServiceFactory for Alexa cookie → AlexaService at session start
   const sessionManager = getSessionManager();
   const deviceCache = getDeviceCache();
+  const sessionCredentialService = options?.credentialService ?? (firebaseServices !== null ? getOrCreateCredentialService(firebaseServices) : null);
+
+  // AlexaServiceFactory: creates AlexaServiceForDispatcher from cookie JSON
+  // Task 4.3, Requirements: 4.1, 4.4
+  const alexaServiceFactory = sessionCredentialService !== null
+    ? async (cookieJson: string): Promise<Result<import('./dispatcher/action-dispatcher.js').AlexaServiceForDispatcher, { code: 'INVALID_COOKIE' | 'SERVICE_ERROR'; message: string }>> => {
+        const tmpFilePath = `/tmp/alexa-session-${Date.now()}-${Math.random().toString(36).slice(2)}.json`;
+        try {
+          fs.writeFileSync(tmpFilePath, cookieJson, { mode: 0o600 });
+          const tempAlexaService = await createAlexaService({
+            amazonPage: 'amazon.co.jp',
+            acceptLanguage: 'ja-JP',
+            cookieFilePath: tmpFilePath,
+          });
+          return { ok: true as const, value: tempAlexaService };
+        } catch (error) {
+          console.error('[Server] Failed to create AlexaService from cookie:', error);
+          return { ok: false as const, error: { code: 'SERVICE_ERROR' as const, message: error instanceof Error ? error.message : 'Failed to create AlexaService' } };
+        } finally {
+          try {
+            if (fs.existsSync(tmpFilePath)) {
+              fs.unlinkSync(tmpFilePath);
+            }
+          } catch {
+            // Ignore cleanup errors
+          }
+        }
+      }
+    : undefined;
+
   app.use('/api/session', createSessionRoutes({
     sessionManager,
     getCachedDevices: () => deviceCache.get(),
-    alexaService: getAlexaService(),
+    ...(sessionCredentialService !== null ? { credentialService: sessionCredentialService } : {}),
+    ...(alexaServiceFactory !== undefined ? { alexaServiceFactory } : {}),
   }));
 
   // Device API routes
@@ -534,6 +631,108 @@ export function createApp(options?: CreateAppOptions): Express {
   const applianceService = getApplianceService();
   const deviceCredentialService = options?.credentialService ?? (firebaseServices !== null ? getOrCreateCredentialService(firebaseServices) : null);
   const userDeviceFetcher = options?.userDeviceFetcher;
+  const userAlexaDeviceFetcher = options?.userAlexaDeviceFetcher;
+
+  /**
+   * Fetch user-specific Alexa devices from their saved cookie.
+   * Returns Device[] on success, empty array on failure (non-blocking).
+   * Errors are logged but do not prevent other devices from being returned.
+   *
+   * Task 4.1 Requirements: 3.1, 3.2, 3.3, 3.4
+   */
+  async function fetchUserAlexaDevices(
+    uid: string,
+    credService: CredentialService
+  ): Promise<readonly Device[]> {
+    try {
+      const alexaCookieResult = await credService.getDecryptedToken(uid, 'alexa');
+      if (!alexaCookieResult.ok) {
+        // No Alexa cookie for this user -> try global AlexaService fallback (Req 3.3)
+        const globalAlexa = getAlexaService();
+        if (globalAlexa && globalAlexa.isConnected()) {
+          const globalResult = globalAlexa.getDevices();
+          if (globalResult.success) {
+            return globalResult.data.map(d => ({
+              id: d.serialNumber,
+              name: d.name,
+              type: 'ALEXA' as const,
+            }));
+          }
+        }
+        return [];
+      }
+
+      // User has Alexa cookie -> fetch their devices
+      if (userAlexaDeviceFetcher !== undefined) {
+        const result = await userAlexaDeviceFetcher(alexaCookieResult.value);
+        if (result.ok) {
+          return result.devices;
+        }
+        // Alexa device fetch failed -> log and continue without Alexa devices (Req 3.4)
+        console.error(`[Server] User Alexa device fetch failed for ${uid}:`, result.error.message);
+        return [];
+      }
+
+      // No userAlexaDeviceFetcher provided -> create AlexaService from cookie (default path)
+      // This is the production path using createAlexaService with temp cookie file
+      return await fetchAlexaDevicesFromCookie(alexaCookieResult.value, uid);
+    } catch (error) {
+      // Any unexpected error -> log and continue without Alexa devices (Req 3.4)
+      console.error(`[Server] User Alexa device fetch error for ${uid}:`, error);
+      return [];
+    }
+  }
+
+  /**
+   * Fetch Alexa devices from a cookie JSON string by creating a temporary AlexaService.
+   * Creates a temp file, initializes AlexaService, gets devices, and cleans up.
+   *
+   * Task 4.1 Requirements: 3.1, 3.4
+   */
+  async function fetchAlexaDevicesFromCookie(cookieJson: string, uid: string): Promise<readonly Device[]> {
+    const tmpFilePath = `/tmp/alexa-devices-${uid}-${Date.now()}.json`;
+    try {
+      fs.writeFileSync(tmpFilePath, cookieJson, { mode: 0o600 });
+
+      // Timeout guard: createAlexaService may hang if cookie data is incomplete
+      // (e.g., only cookie string without formerRegistrationData/macDms)
+      const ALEXA_INIT_TIMEOUT_MS = 15_000;
+      const tempAlexaService = await Promise.race([
+        createAlexaService({
+          amazonPage: 'amazon.co.jp',
+          acceptLanguage: 'ja-JP',
+          cookieFilePath: tmpFilePath,
+        }),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('AlexaService init timeout')), ALEXA_INIT_TIMEOUT_MS)
+        ),
+      ]);
+
+      const devicesResult = tempAlexaService.getDevices();
+      if (devicesResult.success) {
+        return devicesResult.data.map(d => ({
+          id: d.serialNumber,
+          name: d.name,
+          type: 'ALEXA' as const,
+        }));
+      }
+
+      console.error(`[Server] User AlexaService getDevices failed for ${uid}: ${devicesResult.error.message}`);
+      return [];
+    } catch (error) {
+      console.error(`[Server] Failed to create user AlexaService for ${uid}:`, error);
+      return [];
+    } finally {
+      // Clean up temp file
+      try {
+        if (fs.existsSync(tmpFilePath)) {
+          fs.unlinkSync(tmpFilePath);
+        }
+      } catch {
+        // Ignore cleanup errors
+      }
+    }
+  }
 
   if (applianceService !== null || deviceCredentialService !== null) {
     // Register device routes that support both global and user-specific tokens
@@ -549,7 +748,7 @@ export function createApp(options?: CreateAppOptions): Express {
       }));
     } else {
       // Enhanced case: check for user-specific token before falling back to global
-      // Task 10.2-fix-1
+      // Task 10.2-fix-1, Task 4.1
       app.get('/api/devices', async (req: Request, res: Response) => {
         try {
           const user = (req as unknown as { user?: AuthenticatedUser | null }).user;
@@ -559,36 +758,53 @@ export function createApp(options?: CreateAppOptions): Express {
             const tokenResult = await deviceCredentialService.getDecryptedToken(user.uid, 'nature-remo');
 
             if (tokenResult.ok) {
-              // User has a saved token -> fetch devices using their token
+              // User has a saved Nature Remo token -> fetch devices using their token
+              let natureDevices: readonly Device[] = [];
               if (userDeviceFetcher !== undefined) {
                 const result = await userDeviceFetcher(tokenResult.value);
                 if (result.ok) {
-                  deviceCache.set(result.devices);
-                  res.json({ devices: result.devices });
+                  natureDevices = result.devices;
+                } else {
+                  // User's token fetch failed -> return the error
+                  const status = result.error.code === 'RATE_LIMIT_EXCEEDED' ? 429 : 503;
+                  res.status(status).json({ error: result.error });
                   return;
                 }
-                // User's token fetch failed -> return the error
-                const status = result.error.code === 'RATE_LIMIT_EXCEEDED' ? 429 : 503;
-                res.status(status).json({ error: result.error });
-                return;
-              }
-              // No userDeviceFetcher provided -> create default using NatureRemoClient
-              const rateLimitMonitor = createRateLimitMonitor();
-              const userNatureRemoClient = createNatureRemoClient(tokenResult.value, rateLimitMonitor);
-              const userApplianceService = createApplianceService(userNatureRemoClient);
-              const userResult = await userApplianceService.getAppliances();
+              } else {
+                // No userDeviceFetcher provided -> create default using NatureRemoClient
+                const rateLimitMonitor = createRateLimitMonitor();
+                const userNatureRemoClient = createNatureRemoClient(tokenResult.value, rateLimitMonitor);
+                const userApplianceService = createApplianceService(userNatureRemoClient);
+                const userResult = await userApplianceService.getAppliances();
 
-              if (userResult.success) {
-                const devices: Device[] = userResult.data.map(toDevice);
-                deviceCache.set(devices);
-                res.json({ devices });
-                return;
+                if (userResult.success) {
+                  natureDevices = userResult.data.map(toDevice);
+                } else {
+                  // User's token API failed -> return error
+                  sendApplianceErrorResponse(res, userResult.error);
+                  return;
+                }
               }
-              // User's token API failed -> return error
-              sendApplianceErrorResponse(res, userResult.error);
+
+              // Task 4.1: Also fetch user-specific Alexa devices (Req 3.1, 3.2)
+              const alexaDevices = await fetchUserAlexaDevices(user.uid, deviceCredentialService);
+              const allDevices = [...natureDevices, ...alexaDevices];
+
+              deviceCache.set(allDevices);
+              res.json({ devices: allDevices });
               return;
             }
-            // User has no saved token (NOT_FOUND or error) -> fall through to global
+
+            // User has no saved Nature Remo token (NOT_FOUND or error)
+            // Task 4.1: Still try to get Alexa devices even without Nature Remo (Req 3.1)
+            const alexaOnlyDevices = await fetchUserAlexaDevices(user.uid, deviceCredentialService);
+            if (alexaOnlyDevices.length > 0) {
+              deviceCache.set(alexaOnlyDevices);
+              res.json({ devices: alexaOnlyDevices });
+              return;
+            }
+
+            // No Nature Remo token, no Alexa devices -> fall through to global
           }
 
           // Fall back to global applianceService (guest mode or user without token)
@@ -604,7 +820,7 @@ export function createApp(options?: CreateAppOptions): Express {
             if (result.success) {
               const devices: Device[] = result.data.map(toDevice);
 
-              // Append Alexa devices if available
+              // Append Alexa devices if available (global AlexaService for non-user path)
               const alexaService = getAlexaService();
               if (alexaService && alexaService.isConnected()) {
                 const alexaResult = alexaService.getDevices();

@@ -2,8 +2,8 @@
  * Credential Settings UI Component
  *
  * Provides the IoT credential settings section within the settings modal.
- * Displays Nature Remo token input form for authenticated users,
- * and a login prompt for unauthenticated users.
+ * Displays Nature Remo token input form and Alexa credential section
+ * for authenticated users, and a login prompt for unauthenticated users.
  *
  * Requirements:
  * - 5.1: 設定モーダルにIoTクレデンシャル設定セクションを表示する
@@ -11,6 +11,11 @@
  * - 5.3: 保存成功/失敗のフィードバックを表示する
  * - 5.4: トークンがマスク表示された状態で設定済みステータスを表示する
  * - 5.5: 未ログイン時は非表示にするか、ログインを促す表示にする
+ * - 2.1: Alexaクレデンシャルセクションを表示する
+ * - 2.2: Alexaクレデンシャルのステータスインジケーターを表示する
+ * - 2.4: Alexaクレデンシャルの削除ボタンを提供する
+ * - 2.5: ゲストモード時にAlexaセクションを非活性化する
+ * - 2.6: 操作結果のフィードバックメッセージを表示する
  */
 
 /**
@@ -45,6 +50,9 @@ export function createCredentialSettings({ auth, backendApi, onCredentialChange 
 
   /** @type {boolean} */
   let isConfigured = false;
+
+  /** @type {boolean} */
+  let isAlexaConfigured = false;
 
   // =========================================================================
   // DOM Creation
@@ -89,12 +97,25 @@ export function createCredentialSettings({ auth, backendApi, onCredentialChange 
 
   /**
    * Build the credential form for authenticated users.
+   * Contains Nature Remo section and Alexa section.
    */
   function buildCredentialForm() {
     const form = document.createElement('div');
     form.className = 'credential-form';
 
     // Nature Remo section
+    form.appendChild(buildNatureRemoSection());
+
+    // Alexa section
+    form.appendChild(buildAlexaSection());
+
+    return form;
+  }
+
+  /**
+   * Build the Nature Remo credential section with token input.
+   */
+  function buildNatureRemoSection() {
     const serviceItem = document.createElement('div');
     serviceItem.className = 'credential-service-item';
 
@@ -145,13 +166,66 @@ export function createCredentialSettings({ auth, backendApi, onCredentialChange 
     feedback.className = 'credential-feedback-container';
     serviceItem.appendChild(feedback);
 
-    form.appendChild(serviceItem);
-
     // Event listeners
     saveButton.addEventListener('click', handleSave);
     deleteButton.addEventListener('click', handleDelete);
 
-    return form;
+    return serviceItem;
+  }
+
+  /**
+   * Build the Alexa credential section with auth start button.
+   */
+  function buildAlexaSection() {
+    const serviceItem = document.createElement('div');
+    serviceItem.className = 'credential-service-item alexa-credential-section';
+
+    // Service label and status
+    const header = document.createElement('div');
+    header.className = 'credential-service-header';
+
+    const label = document.createElement('span');
+    label.className = 'credential-service-label';
+    label.textContent = 'Alexa';
+
+    const status = document.createElement('span');
+    status.className = 'credential-configured-status';
+    status.textContent = isAlexaConfigured
+      ? '\u2705 \u8A2D\u5B9A\u6E08\u307F'
+      : '\u26A0 \u672A\u8A2D\u5B9A';
+
+    header.appendChild(label);
+    header.appendChild(status);
+    serviceItem.appendChild(header);
+
+    // Action row with auth start button and delete button
+    const actionRow = document.createElement('div');
+    actionRow.className = 'credential-input-row';
+
+    const authButton = document.createElement('button');
+    authButton.className = 'alexa-auth-start-button';
+    authButton.textContent = '\u8A8D\u8A3C\u958B\u59CB';
+    authButton.type = 'button';
+
+    const deleteButton = document.createElement('button');
+    deleteButton.className = 'credential-delete-button';
+    deleteButton.textContent = '\u524A\u9664';
+    deleteButton.type = 'button';
+
+    actionRow.appendChild(authButton);
+    actionRow.appendChild(deleteButton);
+    serviceItem.appendChild(actionRow);
+
+    // Feedback area
+    const feedback = document.createElement('div');
+    feedback.className = 'credential-feedback-container';
+    serviceItem.appendChild(feedback);
+
+    // Event listeners
+    authButton.addEventListener('click', () => handleAlexaAuthStart(authButton));
+    deleteButton.addEventListener('click', handleAlexaDelete);
+
+    return serviceItem;
   }
 
   // =========================================================================
@@ -192,16 +266,137 @@ export function createCredentialSettings({ auth, backendApi, onCredentialChange 
     }
   }
 
+  /** Polling interval in milliseconds for Alexa auth status checks */
+  const ALEXA_AUTH_POLL_INTERVAL_MS = 2000;
+
+  /**
+   * Reset the Alexa auth button to its default (ready) state.
+   * @param {HTMLButtonElement} authButton
+   */
+  function resetAlexaAuthButton(authButton) {
+    authButton.disabled = false;
+    authButton.textContent = '\u8A8D\u8A3C\u958B\u59CB';
+  }
+
+  /**
+   * Handle Alexa auth start button click.
+   * Starts the Proxy auth session, opens popup, and begins polling.
+   * @param {HTMLButtonElement} authButton
+   */
+  async function handleAlexaAuthStart(authButton) {
+    if (!containerElement) return;
+
+    // Disable button and show authenticating state
+    authButton.disabled = true;
+    authButton.textContent = '\u8A8D\u8A3C\u4E2D...';
+
+    try {
+      const { sessionId, proxyUrl } = await backendApi.startAlexaAuth();
+
+      // Open popup window for Amazon login
+      const popup = window.open(proxyUrl, 'alexa-auth', 'width=500,height=700');
+
+      // Start polling for auth status
+      startAlexaAuthPolling(sessionId, popup, authButton);
+    } catch (error) {
+      console.error('[Alexa Auth] Start failed:', error);
+      resetAlexaAuthButton(authButton);
+      showAlexaFeedback('error', '\u8A8D\u8A3C\u306E\u958B\u59CB\u306B\u5931\u6557\u3057\u307E\u3057\u305F\u3002');
+    }
+  }
+
+  /**
+   * Poll for Alexa auth session status at 2-second intervals.
+   * Stops when session is completed, failed, timeout, or popup is closed by user.
+   * @param {string} sessionId
+   * @param {Window|null} popup
+   * @param {HTMLButtonElement} authButton
+   */
+  function startAlexaAuthPolling(sessionId, popup, authButton) {
+    const pollInterval = setInterval(async () => {
+      // Detect user manually closing the popup
+      if (popup && popup.closed) {
+        clearInterval(pollInterval);
+        resetAlexaAuthButton(authButton);
+        return;
+      }
+
+      try {
+        const result = await backendApi.getAlexaAuthStatus(sessionId);
+
+        if (result.status === 'completed') {
+          clearInterval(pollInterval);
+          if (popup && !popup.closed) popup.close();
+          resetAlexaAuthButton(authButton);
+          showAlexaFeedback('success', '\u8A8D\u8A3C\u304C\u5B8C\u4E86\u3057\u307E\u3057\u305F\u3002');
+          await refreshStatus();
+          if (onCredentialChange) onCredentialChange();
+        } else if (result.status === 'failed' || result.status === 'timeout') {
+          clearInterval(pollInterval);
+          if (popup && !popup.closed) popup.close();
+          resetAlexaAuthButton(authButton);
+          const message = result.status === 'timeout'
+            ? '\u8A8D\u8A3C\u304C\u30BF\u30A4\u30E0\u30A2\u30A6\u30C8\u3057\u307E\u3057\u305F\u3002\u518D\u5EA6\u304A\u8A66\u3057\u304F\u3060\u3055\u3044\u3002'
+            : '\u8A8D\u8A3C\u306B\u5931\u6557\u3057\u307E\u3057\u305F\u3002\u518D\u5EA6\u304A\u8A66\u3057\u304F\u3060\u3055\u3044\u3002';
+          showAlexaFeedback('error', message);
+        }
+        // status === 'active': continue polling
+      } catch (error) {
+        clearInterval(pollInterval);
+        resetAlexaAuthButton(authButton);
+        showAlexaFeedback('error', '\u30B9\u30C6\u30FC\u30BF\u30B9\u78BA\u8A8D\u306B\u5931\u6557\u3057\u307E\u3057\u305F\u3002');
+      }
+    }, ALEXA_AUTH_POLL_INTERVAL_MS);
+  }
+
+  async function handleAlexaDelete() {
+    if (!containerElement) return;
+
+    try {
+      await backendApi.deleteCredential('alexa');
+      showAlexaFeedback('success', '\u30AF\u30EC\u30C7\u30F3\u30B7\u30E3\u30EB\u3092\u524A\u9664\u3057\u307E\u3057\u305F\u3002');
+      await refreshStatus();
+      if (onCredentialChange) onCredentialChange();
+    } catch (error) {
+      showAlexaFeedback('error', '\u30AF\u30EC\u30C7\u30F3\u30B7\u30E3\u30EB\u306E\u524A\u9664\u306B\u5931\u6557\u3057\u307E\u3057\u305F\u3002');
+    }
+  }
+
   // =========================================================================
   // Feedback
   // =========================================================================
 
+  /**
+   * Show feedback message in the Nature Remo section.
+   */
   function showFeedback(type, message) {
     if (!containerElement) return;
 
-    const feedbackContainer = containerElement.querySelector('.credential-feedback-container');
+    // Target the Nature Remo section's feedback container (first one, not in Alexa section)
+    const natureRemoSection = containerElement.querySelector('.credential-service-item:not(.alexa-credential-section)');
+    const feedbackContainer = natureRemoSection?.querySelector('.credential-feedback-container');
     if (!feedbackContainer) return;
 
+    showFeedbackInContainer(feedbackContainer, type, message);
+  }
+
+  /**
+   * Show feedback message in the Alexa section.
+   */
+  function showAlexaFeedback(type, message) {
+    if (!containerElement) return;
+
+    const alexaSection = containerElement.querySelector('.alexa-credential-section');
+    const feedbackContainer = alexaSection?.querySelector('.credential-feedback-container');
+    if (!feedbackContainer) return;
+
+    showFeedbackInContainer(feedbackContainer, type, message);
+  }
+
+  /**
+   * Show feedback message in a specific container.
+   */
+  function showFeedbackInContainer(feedbackContainer, type, message) {
     // Remove existing feedback
     const existing = feedbackContainer.querySelector('.credential-feedback');
     if (existing) {
@@ -235,16 +430,33 @@ export function createCredentialSettings({ auth, backendApi, onCredentialChange 
         (c) => c.service === 'nature-remo'
       );
       isConfigured = natureRemo?.configured ?? false;
+
+      const alexa = result.credentials.find(
+        (c) => c.service === 'alexa'
+      );
+      isAlexaConfigured = alexa?.configured ?? false;
     } catch (error) {
       // Silently handle errors
       isConfigured = false;
+      isAlexaConfigured = false;
     }
 
-    // Update status display
+    // Update status displays
     if (containerElement) {
-      const status = containerElement.querySelector('.credential-configured-status');
-      if (status) {
-        status.textContent = isConfigured
+      // Update Nature Remo status
+      const natureRemoSection = containerElement.querySelector('.credential-service-item:not(.alexa-credential-section)');
+      const natureRemoStatus = natureRemoSection?.querySelector('.credential-configured-status');
+      if (natureRemoStatus) {
+        natureRemoStatus.textContent = isConfigured
+          ? '\u2705 \u8A2D\u5B9A\u6E08\u307F'
+          : '\u26A0 \u672A\u8A2D\u5B9A';
+      }
+
+      // Update Alexa status
+      const alexaSection = containerElement.querySelector('.alexa-credential-section');
+      const alexaStatus = alexaSection?.querySelector('.credential-configured-status');
+      if (alexaStatus) {
+        alexaStatus.textContent = isAlexaConfigured
           ? '\u2705 \u8A2D\u5B9A\u6E08\u307F'
           : '\u26A0 \u672A\u8A2D\u5B9A';
       }

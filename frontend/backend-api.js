@@ -416,6 +416,59 @@ export async function getCredentialStatus() {
 }
 
 /**
+ * Start Alexa Proxy authentication session
+ *
+ * Calls POST /api/alexa-auth/start to begin a Proxy authentication session.
+ * Returns a sessionId and proxyUrl for opening the Amazon login popup.
+ * Requires authentication.
+ *
+ * @returns {Promise<{sessionId: string, proxyUrl: string}>} Proxy session info
+ * @throws {ApiError} On auth error (401), session conflict (409), or server error (500)
+ */
+export async function startAlexaAuth() {
+  try {
+    const headers = await buildHeaders();
+    const response = await fetch(`${API_BASE}/api/alexa-auth/start`, {
+      method: 'POST',
+      headers,
+    });
+    return handleResponse(response);
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
+    throw new ApiError('NETWORK_ERROR', error.message);
+  }
+}
+
+/**
+ * Get Alexa Proxy authentication session status
+ *
+ * Calls GET /api/alexa-auth/status/:sessionId for polling the authentication state.
+ * Returns status (active/completed/failed/timeout) and a completed flag.
+ * Requires authentication.
+ *
+ * @param {string} sessionId - Proxy session ID returned from startAlexaAuth
+ * @returns {Promise<{status: string, completed: boolean}>} Session status
+ * @throws {ApiError} On auth error (401), session not found (404), or server error (500)
+ */
+export async function getAlexaAuthStatus(sessionId) {
+  try {
+    const headers = await buildHeaders();
+    const response = await fetch(`${API_BASE}/api/alexa-auth/status/${sessionId}`, {
+      method: 'GET',
+      headers,
+    });
+    return handleResponse(response);
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
+    throw new ApiError('NETWORK_ERROR', error.message);
+  }
+}
+
+/**
  * Delete an IoT credential for the specified service
  *
  * Calls DELETE /api/credentials/:service.

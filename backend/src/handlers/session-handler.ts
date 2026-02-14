@@ -18,9 +18,8 @@ import type {
 } from '../types/api-types.js';
 import { ErrorCodes } from '../types/api-types.js';
 import type { Device, AllowedDevice } from '../types/device-types.js';
-import type { AlexaService } from '../config/component-imports.js';
 import type { CredentialService } from '../services/credential-service.js';
-import type { SessionIoTServices } from '../types/session-types.js';
+import type { SessionIoTServices, AlexaServiceForDispatcher } from '../types/session-types.js';
 import type { AuthenticatedUser } from '../types/auth-types.js';
 import type { Result } from '../types/action-types.js';
 
@@ -46,16 +45,38 @@ export type IoTServiceFactory = (
 ) => Promise<Result<SessionIoTServices, IoTServiceFactoryError>>;
 
 /**
+ * Error type for Alexa service factory
+ */
+export interface AlexaServiceFactoryError {
+  readonly code: 'INVALID_COOKIE' | 'SERVICE_ERROR';
+  readonly message: string;
+}
+
+/**
+ * Factory function to create AlexaServiceForDispatcher from a user's Alexa cookie JSON.
+ * Called during session start when a logged-in user has a stored Alexa cookie.
+ *
+ * @param cookieJson - Decrypted Alexa cookie JSON string
+ * @returns Result with AlexaServiceForDispatcher on success, error on failure
+ *
+ * Task 4.3, Requirements: 4.1, 4.4
+ */
+export type AlexaServiceFactory = (
+  cookieJson: string
+) => Promise<Result<AlexaServiceForDispatcher, AlexaServiceFactoryError>>;
+
+/**
  * Dependencies for session routes
  */
 export interface SessionRouteDependencies {
   readonly sessionManager: SessionManagerService;
   readonly getCachedDevices: () => readonly Device[] | null;
-  readonly alexaService?: AlexaService | null;
   /** Credential service for fetching user IoT tokens (Task 6.2) */
   readonly credentialService?: CredentialService;
   /** Factory for creating user-specific IoT services from a token (Task 6.2) */
   readonly iotServiceFactory?: IoTServiceFactory;
+  /** Factory for creating user-specific AlexaService from an Alexa cookie (Task 4.3) */
+  readonly alexaServiceFactory?: AlexaServiceFactory;
 }
 
 /**
@@ -88,17 +109,21 @@ function isSessionRouteDependencies(
 }
 
 /**
- * Send Alexa announcement (fire-and-forget).
- * Uses the first available Alexa device. Logs errors but never throws.
+ * Send Alexa announcement (fire-and-forget) using session's AlexaService.
+ * Uses the first ALEXA device from allowedDevices for the serial number.
+ * Logs errors but never throws.
  */
-function sendAlexaAnnouncement(alexaService: AlexaService, message: string): void {
-  const devicesResult = alexaService.getDevices();
-  if (!devicesResult.success || devicesResult.data.length === 0) {
-    console.warn('[Session] No Alexa devices available for announcement');
+function sendAlexaAnnouncement(
+  alexaService: AlexaServiceForDispatcher,
+  allowedDevices: readonly AllowedDevice[],
+  message: string
+): void {
+  const alexaDevice = allowedDevices.find(d => d.type === 'ALEXA');
+  if (!alexaDevice) {
+    console.warn('[Session] No ALEXA device in allowedDevices for announcement');
     return;
   }
-  const serial = devicesResult.data[0]!.serialNumber;
-  alexaService.announce(serial, message).catch((err) => {
+  alexaService.announce(alexaDevice.id, message).catch((err: unknown) => {
     console.error('[Session] Alexa announcement failed:', err);
   });
 }
@@ -175,9 +200,9 @@ export function createSessionRoutes(
   deps: SessionRouteDependencies | SessionManagerService
 ): Router {
   // Support both old and new signatures for backward compatibility
-  const { sessionManager, getCachedDevices, alexaService, credentialService, iotServiceFactory } = isSessionRouteDependencies(deps)
-    ? { ...deps, alexaService: deps.alexaService ?? null, credentialService: deps.credentialService, iotServiceFactory: deps.iotServiceFactory }
-    : { sessionManager: deps, getCachedDevices: () => null, alexaService: null, credentialService: undefined, iotServiceFactory: undefined };
+  const { sessionManager, getCachedDevices, credentialService, iotServiceFactory, alexaServiceFactory } = isSessionRouteDependencies(deps)
+    ? { ...deps, credentialService: deps.credentialService, iotServiceFactory: deps.iotServiceFactory, alexaServiceFactory: deps.alexaServiceFactory }
+    : { sessionManager: deps, getCachedDevices: () => null, credentialService: undefined, iotServiceFactory: undefined, alexaServiceFactory: undefined };
 
   const router = Router();
 
@@ -245,13 +270,20 @@ export function createSessionRoutes(
       // Resolve IoT services for the session
       let sessionIoTServices: SessionIoTServices | undefined;
 
-      if (uid !== null && credentialService !== undefined && iotServiceFactory !== undefined) {
-        // Authenticated user: attempt to load user-specific IoT token
-        const tokenResult = await credentialService.getDecryptedToken(uid, 'nature-remo');
+      if (uid !== null && credentialService !== undefined) {
+        // Authenticated user: fetch Nature Remo and Alexa credentials in parallel (Task 4.3, Req 4.1)
+        const [natureRemoTokenResult, alexaCookieResult] = await Promise.all([
+          iotServiceFactory !== undefined
+            ? credentialService.getDecryptedToken(uid, 'nature-remo')
+            : Promise.resolve({ ok: false as const, error: { code: 'NOT_FOUND' as const, message: 'no factory' } }),
+          alexaServiceFactory !== undefined
+            ? credentialService.getDecryptedToken(uid, 'alexa')
+            : Promise.resolve({ ok: false as const, error: { code: 'NOT_FOUND' as const, message: 'no factory' } }),
+        ]);
 
-        if (tokenResult.ok) {
-          // Token found: create user-specific IoT services
-          const factoryResult = await iotServiceFactory(tokenResult.value);
+        // Process Nature Remo token
+        if (natureRemoTokenResult.ok && iotServiceFactory !== undefined) {
+          const factoryResult = await iotServiceFactory(natureRemoTokenResult.value);
 
           if (factoryResult.ok) {
             sessionIoTServices = factoryResult.value;
@@ -268,6 +300,30 @@ export function createSessionRoutes(
           }
         }
         // If token NOT_FOUND or FIRESTORE_ERROR: sessionIoTServices remains undefined (fallback to global)
+
+        // Process Alexa cookie (Task 4.3, Requirements: 4.1, 4.4, 5.2)
+        // AlexaService creation failure is non-blocking — session continues without it
+        if (alexaCookieResult.ok && alexaServiceFactory !== undefined) {
+          try {
+            const alexaResult = await alexaServiceFactory(alexaCookieResult.value);
+            if (alexaResult.ok) {
+              // Merge AlexaService into sessionIoTServices
+              if (sessionIoTServices !== undefined) {
+                sessionIoTServices = { ...sessionIoTServices, alexaService: alexaResult.value };
+              } else {
+                sessionIoTServices = {
+                  lightService: undefined,
+                  airconService: undefined,
+                  alexaService: alexaResult.value,
+                };
+              }
+            } else {
+              console.warn(`[Session] Failed to create user AlexaService for ${uid}: ${alexaResult.error.message}`);
+            }
+          } catch (error) {
+            console.error(`[Session] Unexpected error creating AlexaService for ${uid}:`, error);
+          }
+        }
       }
       // Guest mode (uid === null): sessionIoTServices remains undefined (use global)
 
@@ -276,10 +332,10 @@ export function createSessionRoutes(
       const response = buildSessionResponse(session);
 
       // Alexa announcement on session start (fire-and-forget)
-      // Only announce if ALEXA device is in allowedDevices
-      const hasAlexaDevice = allowedDevices?.some(d => d.type === 'ALEXA') ?? false;
-      if (hasAlexaDevice && alexaService?.isConnected()) {
-        sendAlexaAnnouncement(alexaService, '今日も頑張りましょう');
+      // Use the session's user-specific AlexaService for the announcement
+      const sessionAlexa = sessionIoTServices?.alexaService;
+      if (sessionAlexa?.isConnected() && allowedDevices !== undefined) {
+        sendAlexaAnnouncement(sessionAlexa, allowedDevices, '今日も頑張りましょう');
       }
 
       res.json(response);
@@ -317,6 +373,10 @@ export function createSessionRoutes(
         return;
       }
 
+      // Get session's AlexaService BEFORE ending (endSession deletes iotServices)
+      const sessionIoT = sessionManager.getSessionIoTServices(targetSessionId);
+      const endAlexaService = sessionIoT?.alexaService;
+
       const result = sessionManager.endSession(targetSessionId);
 
       if (!result.ok) {
@@ -333,10 +393,9 @@ export function createSessionRoutes(
       const response = buildSessionResponse(result.value);
 
       // Alexa announcement on session end (fire-and-forget)
-      // Only announce if ALEXA device was in session's allowedDevices
-      const hadAlexaDevice = result.value.allowedDevices?.some(d => d.type === 'ALEXA') ?? false;
-      if (hadAlexaDevice && alexaService?.isConnected()) {
-        sendAlexaAnnouncement(alexaService, 'お疲れ様でした');
+      // Use the session's user-specific AlexaService retrieved before endSession
+      if (endAlexaService?.isConnected() && result.value.allowedDevices !== undefined) {
+        sendAlexaAnnouncement(endAlexaService, result.value.allowedDevices, 'お疲れ様でした');
       }
 
       res.json(response);

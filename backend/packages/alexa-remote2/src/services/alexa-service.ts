@@ -611,3 +611,76 @@ export async function createAlexaService(
 
   return service;
 }
+
+// ============================================================================
+// Proxy-Only Factory Function
+// ============================================================================
+
+/**
+ * Minimal interface for the raw AlexaRemote instance used by proxy services.
+ * Provides on() for event listening, stopProxyServer() for cleanup,
+ * and proxyPort for reverse proxy routing.
+ */
+export interface AlexaRemoteForProxy {
+  on(event: string, handler: (...args: readonly unknown[]) => void): void;
+  stopProxyServer?: (() => void) | undefined;
+  proxyPort?: number | undefined;
+  /** Get the full cookie data object for proper reconnection (includes formerRegistrationData, macDms). */
+  getCookieData(): unknown;
+}
+
+/**
+ * Create a raw AlexaRemote instance configured for proxy-only mode.
+ *
+ * Unlike createAlexaService which returns an AlexaService wrapper,
+ * this function returns the raw alexa-remote2 instance with on(),
+ * stopProxyServer(), and proxyPort exposed -- specifically for use
+ * by AlexaProxyService to manage proxy authentication sessions.
+ *
+ * @param config - AlexaServiceConfig with proxy settings
+ * @returns AlexaRemoteForProxy with raw event and proxy methods
+ */
+export async function createAlexaRemoteForProxy(
+  config: AlexaServiceConfig
+): Promise<AlexaRemoteForProxy> {
+  const alexa = new AlexaRemote();
+
+  // alexa-remote2 stores `this._options = initOptions` (same reference).
+  // alexa-cookie2 mutates `_options.proxyPort` after the proxy server starts
+  // (assigns the OS-assigned port). We read proxyPort from this object after init.
+  const initOptions: Record<string, unknown> = {
+    amazonPage: config.amazonPage,
+    acceptLanguage: config.acceptLanguage,
+    usePushConnection: false,
+    proxyOnly: true,
+    proxyOwnIp: config.proxyOwnIp ?? 'localhost',
+    proxyPort: config.proxyPort ?? 0,
+  };
+
+  // Initialize alexa-remote2 in proxy-only mode
+  await new Promise<void>((resolve) => {
+    alexa.init(initOptions as Parameters<typeof alexa.init>[0], () => {
+      // In proxy-only mode, init callback fires after proxy server starts.
+      // Errors here are expected (no cookie yet) and not blocking.
+      resolve();
+    });
+  });
+
+  // Return the raw instance with proxy-relevant methods
+  return {
+    on: (event: string, handler: (...args: readonly unknown[]) => void) => {
+      alexa.on(event, handler);
+    },
+    stopProxyServer: () => {
+      alexa.stopProxyServer(() => {});
+    },
+    // proxyPort is stored in _options (mutated by alexa-cookie2), not on the instance
+    proxyPort: initOptions['proxyPort'] as number | undefined,
+    getCookieData(): unknown {
+      // Return the full cookie data object (cookieData > cookie) for proper reconnection.
+      // cookieData includes formerRegistrationData and macDms needed by createAlexaService.
+      const inst = alexa as unknown as Record<string, unknown>;
+      return inst['cookieData'] ?? inst['cookie'];
+    },
+  };
+}

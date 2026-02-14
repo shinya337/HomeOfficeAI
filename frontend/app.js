@@ -21,7 +21,7 @@ import {
 } from './app-mode-integration.js';
 import { initAuth, _getAuthInstance } from './app-auth-integration.js';
 import { createCredentialSettings } from './credential-settings.js';
-import { saveCredential, getCredentialStatus, deleteCredential } from './backend-api.js';
+import { saveCredential, getCredentialStatus, deleteCredential, startAlexaAuth, getAlexaAuthStatus } from './backend-api.js';
 
 // 6つの背景テーマ
 const THEMES = [
@@ -280,6 +280,7 @@ async function beginSession() {
 async function stopWork() {
   const elapsed = formatTime(Date.now() - state.startTime);
 
+  const hadAlexaSpeech = state.alexaSpeechEnabled;
   state.isWorking = false;
   state.alexaSpeechEnabled = false;
   clearInterval(state.timerInterval);
@@ -299,7 +300,7 @@ async function stopWork() {
   }
 
   // Alexaがない場合、Web Speech APIで終了挨拶
-  if (!state.alexaSpeechEnabled) {
+  if (!hadAlexaSpeech) {
     speak('お疲れ様でした');
   }
 
@@ -433,7 +434,7 @@ async function openSettings() {
       if (credentialContainer) {
         credentialSettings = createCredentialSettings({
           auth: authInstance,
-          backendApi: { saveCredential, getCredentialStatus, deleteCredential },
+          backendApi: { saveCredential, getCredentialStatus, deleteCredential, startAlexaAuth, getAlexaAuthStatus },
           onCredentialChange: () => {
             if (deviceListElement) fetchAndDisplayDevices(deviceListElement);
           },

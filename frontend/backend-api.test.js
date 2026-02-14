@@ -23,6 +23,8 @@ const {
   saveCredential,
   getCredentialStatus,
   deleteCredential,
+  startAlexaAuth,
+  getAlexaAuthStatus,
   setAuthTokenProvider,
   getSessionId,
   clearSessionId,
@@ -1158,6 +1160,242 @@ describe('API Client Module', () => {
       const error = await deleteCredential('nature-remo').catch((e) => e);
       expect(error).toBeInstanceOf(ApiError);
       expect(error.code).toBe('NETWORK_ERROR');
+    });
+  });
+
+  // Task 5.1: Alexa Proxy認証用API関数
+  // Requirements: 2.3
+  describe('startAlexaAuth', () => {
+    it('should call POST /api/alexa-auth/start', async () => {
+      const mockResponse = {
+        sessionId: 'alexa-proxy-session-123',
+        proxyUrl: '/api/alexa-auth/proxy/alexa-proxy-session-123/',
+      };
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(mockResponse),
+      });
+
+      const result = await startAlexaAuth();
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      expect(mockFetch).toHaveBeenCalledWith('/api/alexa-auth/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      expect(result).toEqual(mockResponse);
+    });
+
+    it('should return sessionId and proxyUrl from response', async () => {
+      const mockResponse = {
+        sessionId: 'proxy-abc',
+        proxyUrl: '/api/alexa-auth/proxy/proxy-abc/',
+      };
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(mockResponse),
+      });
+
+      const result = await startAlexaAuth();
+
+      expect(result.sessionId).toBe('proxy-abc');
+      expect(result.proxyUrl).toBe('/api/alexa-auth/proxy/proxy-abc/');
+    });
+
+    it('should include Authorization header when token provider is set', async () => {
+      setAuthTokenProvider(vi.fn().mockResolvedValue('firebase-alexa-token'));
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ sessionId: 'auth-session', proxyUrl: '/api/alexa-auth/proxy/auth-session/' }),
+      });
+
+      await startAlexaAuth();
+
+      const [, options] = mockFetch.mock.calls[0];
+      expect(options.headers['Authorization']).toBe('Bearer firebase-alexa-token');
+    });
+
+    it('should throw ApiError on session conflict (409)', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 409,
+        json: () => Promise.resolve({
+          error: { code: 'SESSION_ALREADY_ACTIVE', message: 'A proxy session is already active' },
+        }),
+      });
+
+      const error = await startAlexaAuth().catch((e) => e);
+
+      expect(error).toBeInstanceOf(ApiError);
+      expect(error.code).toBe('SESSION_ALREADY_ACTIVE');
+      expect(error.status).toBe(409);
+    });
+
+    it('should throw ApiError on auth error (401)', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 401,
+        json: () => Promise.resolve({
+          error: { code: 'UNAUTHORIZED', message: 'Authentication required' },
+        }),
+      });
+
+      const error = await startAlexaAuth().catch((e) => e);
+
+      expect(error).toBeInstanceOf(ApiError);
+      expect(error.code).toBe('UNAUTHORIZED');
+      expect(error.status).toBe(401);
+    });
+
+    it('should throw ApiError on server error (500)', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        json: () => Promise.resolve({
+          error: { code: 'PROXY_START_FAILED', message: 'Failed to start proxy' },
+        }),
+      });
+
+      const error = await startAlexaAuth().catch((e) => e);
+
+      expect(error).toBeInstanceOf(ApiError);
+      expect(error.code).toBe('PROXY_START_FAILED');
+      expect(error.status).toBe(500);
+    });
+
+    it('should throw ApiError on network failure', async () => {
+      mockFetch.mockRejectedValue(new Error('Network error'));
+
+      const error = await startAlexaAuth().catch((e) => e);
+
+      expect(error).toBeInstanceOf(ApiError);
+      expect(error.code).toBe('NETWORK_ERROR');
+      expect(error.message).toBe('Network error');
+    });
+  });
+
+  describe('getAlexaAuthStatus', () => {
+    it('should call GET /api/alexa-auth/status/:sessionId', async () => {
+      const mockResponse = {
+        status: 'active',
+        completed: false,
+      };
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(mockResponse),
+      });
+
+      const result = await getAlexaAuthStatus('proxy-session-xyz');
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      expect(mockFetch).toHaveBeenCalledWith('/api/alexa-auth/status/proxy-session-xyz', {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      expect(result).toEqual(mockResponse);
+    });
+
+    it('should return completed: true when authentication is done', async () => {
+      const mockResponse = {
+        status: 'completed',
+        completed: true,
+      };
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(mockResponse),
+      });
+
+      const result = await getAlexaAuthStatus('completed-session');
+
+      expect(result.status).toBe('completed');
+      expect(result.completed).toBe(true);
+    });
+
+    it('should return timeout status when session timed out', async () => {
+      const mockResponse = {
+        status: 'timeout',
+        completed: false,
+      };
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(mockResponse),
+      });
+
+      const result = await getAlexaAuthStatus('timeout-session');
+
+      expect(result.status).toBe('timeout');
+      expect(result.completed).toBe(false);
+    });
+
+    it('should return failed status when authentication failed', async () => {
+      const mockResponse = {
+        status: 'failed',
+        completed: false,
+      };
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(mockResponse),
+      });
+
+      const result = await getAlexaAuthStatus('failed-session');
+
+      expect(result.status).toBe('failed');
+      expect(result.completed).toBe(false);
+    });
+
+    it('should include Authorization header when token provider is set', async () => {
+      setAuthTokenProvider(vi.fn().mockResolvedValue('firebase-status-token'));
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ status: 'active', completed: false }),
+      });
+
+      await getAlexaAuthStatus('session-id');
+
+      const [, options] = mockFetch.mock.calls[0];
+      expect(options.headers['Authorization']).toBe('Bearer firebase-status-token');
+    });
+
+    it('should throw ApiError on session not found (404)', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 404,
+        json: () => Promise.resolve({
+          error: { code: 'SESSION_NOT_FOUND', message: 'Session not found' },
+        }),
+      });
+
+      const error = await getAlexaAuthStatus('nonexistent-session').catch((e) => e);
+
+      expect(error).toBeInstanceOf(ApiError);
+      expect(error.code).toBe('SESSION_NOT_FOUND');
+      expect(error.status).toBe(404);
+    });
+
+    it('should throw ApiError on auth error (401)', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 401,
+        json: () => Promise.resolve({
+          error: { code: 'UNAUTHORIZED', message: 'Authentication required' },
+        }),
+      });
+
+      const error = await getAlexaAuthStatus('session-id').catch((e) => e);
+
+      expect(error).toBeInstanceOf(ApiError);
+      expect(error.code).toBe('UNAUTHORIZED');
+      expect(error.status).toBe(401);
+    });
+
+    it('should throw ApiError on network failure', async () => {
+      mockFetch.mockRejectedValue(new Error('Network error'));
+
+      const error = await getAlexaAuthStatus('session-id').catch((e) => e);
+
+      expect(error).toBeInstanceOf(ApiError);
+      expect(error.code).toBe('NETWORK_ERROR');
+      expect(error.message).toBe('Network error');
     });
   });
 });

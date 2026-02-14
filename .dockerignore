@@ -8,6 +8,7 @@ backend/packages/*/node_modules
 .env
 .env.*
 !.env.example
+!.env.production
 
 # Version control
 .git
