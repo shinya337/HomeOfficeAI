@@ -16,9 +16,9 @@ import type {
   NextInterval,
   AgentError,
   ActionDispatchError,
-  AgentConfigError,
   ApplianceConfig,
 } from './actions.js';
+import type { AgentConfigError } from '../config/config-loader.js';
 
 describe('ApplianceConfig 共通型定義', () => {
   it('lightApplianceId と airconApplianceId を持つこと', () => {

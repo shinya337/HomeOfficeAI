@@ -7,7 +7,7 @@
  * - GET /api/alexa-auth/status/:sessionId (session status polling)
  * - Require Auth guard on all endpoints
  * - Session owner verification (other user's session access rejected)
- * - Error responses: 401, 404, 409, 500
+ * - Error responses: 401, 404, 500
  * - proxyUrl format validation (design spec compliance)
  * - Error message propagation from AlexaProxyService
  * - Non-Error thrown exception handling
@@ -160,23 +160,6 @@ describe('Alexa Proxy Handler', () => {
         .expect(200);
 
       expect(mockProxyService.startProxySession).toHaveBeenCalledWith('another-uid-456');
-    });
-
-    it('should return 409 when session already active', async () => {
-      mockProxyService.startProxySession.mockResolvedValue({
-        ok: false,
-        error: {
-          code: 'SESSION_ALREADY_ACTIVE',
-          message: 'User test-uid-123 already has an active proxy session: existing-session',
-        },
-      } satisfies Result<ProxySession, AlexaProxyError>);
-
-      const response = await request(app)
-        .post('/api/alexa-auth/start')
-        .expect(409);
-
-      expect(response.body.error).toBe('SESSION_ALREADY_ACTIVE');
-      expect(response.body).toHaveProperty('message');
     });
 
     it('should return 500 when proxy start fails', async () => {
@@ -498,18 +481,18 @@ describe('Alexa Proxy Handler', () => {
     });
 
     it('should propagate error message from AlexaProxyService in error responses', async () => {
-      const errorMessage = 'User test-uid-123 already has an active proxy session: existing-sess-001';
+      const errorMessage = 'Proxyの起動に失敗しました: Port allocation failed';
       mockProxyService.startProxySession.mockResolvedValue({
         ok: false,
         error: {
-          code: 'SESSION_ALREADY_ACTIVE',
+          code: 'PROXY_START_FAILED',
           message: errorMessage,
         },
       });
 
       const response = await request(app)
         .post('/api/alexa-auth/start')
-        .expect(409);
+        .expect(500);
 
       expect(response.body.message).toBe(errorMessage);
     });
@@ -684,25 +667,6 @@ describe('Alexa Proxy Handler', () => {
   });
 
   describe('Error response structure consistency', () => {
-    it('should always include error and message fields in error responses (409)', async () => {
-      mockProxyService.startProxySession.mockResolvedValue({
-        ok: false,
-        error: {
-          code: 'SESSION_ALREADY_ACTIVE',
-          message: 'Active session exists',
-        },
-      });
-
-      const response = await request(app)
-        .post('/api/alexa-auth/start')
-        .expect(409);
-
-      expect(response.body).toHaveProperty('error');
-      expect(response.body).toHaveProperty('message');
-      expect(typeof response.body.error).toBe('string');
-      expect(typeof response.body.message).toBe('string');
-    });
-
     it('should always include error and message fields in error responses (500 service error)', async () => {
       mockProxyService.startProxySession.mockResolvedValue({
         ok: false,

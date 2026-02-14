@@ -35,7 +35,6 @@ export interface ProxySession {
  * Error codes for AlexaProxyService operations.
  */
 export type AlexaProxyErrorCode =
-  | 'SESSION_ALREADY_ACTIVE'
   | 'SESSION_NOT_FOUND'
   | 'PROXY_START_FAILED'
   | 'SAVE_FAILED'

@@ -70,15 +70,13 @@ describe('ProxySession type', () => {
 describe('AlexaProxyErrorCode type', () => {
   it('should support all error codes', () => {
     const codes: AlexaProxyErrorCode[] = [
-      'SESSION_ALREADY_ACTIVE',
       'SESSION_NOT_FOUND',
       'PROXY_START_FAILED',
       'SAVE_FAILED',
       'TIMEOUT',
     ];
 
-    expect(codes).toHaveLength(5);
-    expect(codes).toContain('SESSION_ALREADY_ACTIVE');
+    expect(codes).toHaveLength(4);
     expect(codes).toContain('SESSION_NOT_FOUND');
     expect(codes).toContain('PROXY_START_FAILED');
     expect(codes).toContain('SAVE_FAILED');
@@ -93,12 +91,12 @@ describe('AlexaProxyErrorCode type', () => {
 describe('AlexaProxyError type', () => {
   it('should have code and message fields', () => {
     const error: AlexaProxyError = {
-      code: 'SESSION_ALREADY_ACTIVE',
-      message: 'A proxy session is already active for this user',
+      code: 'PROXY_START_FAILED',
+      message: 'Failed to start proxy server',
     };
 
-    expect(error.code).toBe('SESSION_ALREADY_ACTIVE');
-    expect(error.message).toBe('A proxy session is already active for this user');
+    expect(error.code).toBe('PROXY_START_FAILED');
+    expect(error.message).toBe('Failed to start proxy server');
   });
 
   it('should have readonly properties', () => {
@@ -190,8 +188,8 @@ describe('AlexaProxyService interface', () => {
       startProxySession: async () => ({
         ok: false,
         error: {
-          code: 'SESSION_ALREADY_ACTIVE' as const,
-          message: 'Active session exists',
+          code: 'PROXY_START_FAILED' as const,
+          message: 'Failed to start proxy server',
         },
       }),
       getProxySession: () => undefined,
@@ -201,7 +199,7 @@ describe('AlexaProxyService interface', () => {
     const result = await mockService.startProxySession('user-1');
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.error.code).toBe('SESSION_ALREADY_ACTIVE');
+      expect(result.error.code).toBe('PROXY_START_FAILED');
     }
   });
 

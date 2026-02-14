@@ -188,15 +188,3 @@ export interface ActionDispatchError {
   readonly message: string;
   readonly originalError?: unknown;
 }
-
-/**
- * エージェント設定エラー
- *
- * - MISSING_PROJECT_ID: GOOGLE_CLOUD_PROJECT 未設定
- * - MISSING_TOKEN: NATURE_REMO_TOKEN 未設定
- */
-export interface AgentConfigError {
-  readonly code: 'MISSING_PROJECT_ID' | 'MISSING_TOKEN';
-  readonly message: string;
-  readonly suggestion: string;
-}

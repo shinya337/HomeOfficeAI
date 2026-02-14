@@ -35,7 +35,6 @@ export interface AlexaProxyRouteDependencies {
  * Map AlexaProxyErrorCode to HTTP status codes.
  */
 const ERROR_STATUS_MAP: Record<AlexaProxyErrorCode, number> = {
-  SESSION_ALREADY_ACTIVE: 409,
   SESSION_NOT_FOUND: 404,
   PROXY_START_FAILED: 500,
   SAVE_FAILED: 500,

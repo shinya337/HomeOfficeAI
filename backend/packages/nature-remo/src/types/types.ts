@@ -142,11 +142,6 @@ export type AirconMode = 'cool' | 'warm' | 'dry' | 'blow' | 'auto';
 export type AirconVolume = 'auto' | '1' | '2' | '3' | '4';
 
 /**
- * Aircon direction settings.
- */
-export type AirconDir = 'auto' | '1' | '2' | '3' | '4' | '5' | 'swing';
-
-/**
  * Temperature unit.
  */
 export type TempUnit = 'c' | 'f';

@@ -1215,20 +1215,20 @@ describe('API Client Module', () => {
       expect(options.headers['Authorization']).toBe('Bearer firebase-alexa-token');
     });
 
-    it('should throw ApiError on session conflict (409)', async () => {
+    it('should throw ApiError on server error (500)', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: false,
-        status: 409,
+        status: 500,
         json: () => Promise.resolve({
-          error: { code: 'SESSION_ALREADY_ACTIVE', message: 'A proxy session is already active' },
+          error: { code: 'PROXY_START_FAILED', message: 'Failed to start proxy server' },
         }),
       });
 
       const error = await startAlexaAuth().catch((e) => e);
 
       expect(error).toBeInstanceOf(ApiError);
-      expect(error.code).toBe('SESSION_ALREADY_ACTIVE');
-      expect(error.status).toBe(409);
+      expect(error.code).toBe('PROXY_START_FAILED');
+      expect(error.status).toBe(500);
     });
 
     it('should throw ApiError on auth error (401)', async () => {

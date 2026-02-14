@@ -83,7 +83,6 @@ export {
   createAlexaService,
   createAlexaRemoteForProxy,
   type AlexaService,
-  type AlexaRemoteForProxy,
 } from '../../packages/alexa-remote2/src/services/alexa-service.js';
 
 export {
