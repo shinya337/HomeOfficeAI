@@ -35,6 +35,7 @@ import { Intervals } from '../types/api-types.js';
 import { buildPrompt } from '../../packages/iot-ai-agent-loop/src/agent/prompt-builder.js';
 import type { FunctionDeclaration } from '@google-cloud/vertexai';
 import type { AllowedDevice } from '../types/device-types.js';
+import type { SessionIoTServices } from '../types/session-types.js';
 
 // =============================================================================
 // Types
@@ -58,7 +59,7 @@ export interface DynamicAgentClientService {
 export interface AnalyzeHandlerDependencies {
   readonly sessionManager: SessionManagerService;
   readonly agentClient: AgentClientService | DynamicAgentClientService;
-  readonly actionDispatcherFactory: (allowedDevices: readonly AllowedDevice[]) => ActionDispatcherService;
+  readonly actionDispatcherFactory: (allowedDevices: readonly AllowedDevice[], sessionIoTServices?: SessionIoTServices) => ActionDispatcherService;
   readonly deviceStateService: DeviceStateService;
   /** Optional: when provided, enables dynamic tool generation based on allowed devices (Req 4.1, 4.2) */
   readonly dynamicToolBuilder?: DynamicToolBuilderService;
@@ -108,9 +109,10 @@ export interface AnalyzeHandlerService {
   /**
    * Analyze an image and execute appropriate action
    * @param imageData The image to analyze
+   * @param sessionId Optional session ID to look up session-specific IoT services (Task 6.3)
    * @returns Result with analysis result or error
    */
-  analyze(imageData: ImageData): Promise<Result<AnalyzeResult, AnalyzeError>>;
+  analyze(imageData: ImageData, sessionId?: string): Promise<Result<AnalyzeResult, AnalyzeError>>;
 }
 
 // =============================================================================
@@ -186,7 +188,7 @@ export function createAnalyzeHandler(
   const { sessionManager, agentClient, actionDispatcherFactory, deviceStateService, dynamicToolBuilder } = deps;
 
   return {
-    async analyze(imageData: ImageData): Promise<Result<AnalyzeResult, AnalyzeError>> {
+    async analyze(imageData: ImageData, sessionId?: string): Promise<Result<AnalyzeResult, AnalyzeError>> {
       // Step 1: Validate session is active (Req 6.2, 6.5)
       if (!sessionManager.hasActiveSession()) {
         return {
@@ -199,12 +201,33 @@ export function createAnalyzeHandler(
         };
       }
 
-      // Step 1.5: Get allowed devices from session (Req 4.1)
-      const session = sessionManager.getStatus();
-      const allowedDevices = session?.allowedDevices;
+      // Step 1.5: Get allowed devices and IoT services from session (Req 4.1, Task 6.3)
+      let allowedDevices: readonly AllowedDevice[] | undefined;
+      let sessionIoTServices: SessionIoTServices | undefined;
 
-      // Step 1.6: Create per-request ActionDispatcher with session's allowedDevices (Req 7.1, 7.2)
-      const actionDispatcher = actionDispatcherFactory(allowedDevices ?? []);
+      if (sessionId !== undefined) {
+        // Look up specific session by sessionId (Task 6.3)
+        const session = sessionManager.getSession(sessionId);
+        if (session === undefined) {
+          return {
+            ok: false,
+            error: {
+              code: 'NO_ACTIVE_SESSION',
+              message: `セッションが見つかりません: ${sessionId}`,
+              retryable: false,
+            },
+          };
+        }
+        allowedDevices = session.allowedDevices;
+        sessionIoTServices = sessionManager.getSessionIoTServices(sessionId);
+      } else {
+        // Backward compatibility: use getStatus() for first active session
+        const session = sessionManager.getStatus();
+        allowedDevices = session?.allowedDevices;
+      }
+
+      // Step 1.6: Create per-request ActionDispatcher with session's allowedDevices and IoT services (Req 7.1, 7.2, Task 6.3)
+      const actionDispatcher = actionDispatcherFactory(allowedDevices ?? [], sessionIoTServices);
 
       // Step 2: Get current device state filtered by allowed devices (Req 6.1, 6.3)
       let deviceState: FilteredDeviceState | undefined;

@@ -26,6 +26,8 @@ import type { DynamicToolBuilderService } from './dynamic-tool-builder.js';
 import type { DeviceStateService, FilteredDeviceState } from './device-state-service.js';
 import type { AllowedDevice } from '../types/device-types.js';
 import type { FunctionDeclaration } from '@google-cloud/vertexai';
+import type { SessionIoTServices } from '../types/session-types.js';
+import type { LightService, AirconService } from '../dispatcher/action-dispatcher.js';
 
 // =============================================================================
 // Mock Factories
@@ -133,8 +135,8 @@ describe('AnalyzeHandlerService', () => {
 
     it('should return NO_ACTIVE_SESSION error after session ends', async () => {
       // Start and end session
-      sessionManager.startSession();
-      sessionManager.endSession();
+      const session = sessionManager.startSession(null);
+      sessionManager.endSession(session.sessionId);
 
       const result = await analyzeHandler.analyze(TEST_IMAGE);
 
@@ -145,7 +147,7 @@ describe('AnalyzeHandlerService', () => {
     });
 
     it('should proceed with analysis when session is active', async () => {
-      sessionManager.startSession();
+      sessionManager.startSession(null);
 
       const result = await analyzeHandler.analyze(TEST_IMAGE);
 
@@ -155,7 +157,7 @@ describe('AnalyzeHandlerService', () => {
 
   describe('AI Image Analysis (Req 3.1, 3.2)', () => {
     beforeEach(() => {
-      sessionManager.startSession();
+      sessionManager.startSession(null);
     });
 
     it('should call AgentClient.analyze with image data and prompt', async () => {
@@ -218,7 +220,7 @@ describe('AnalyzeHandlerService', () => {
 
   describe('Device State Retrieval', () => {
     beforeEach(() => {
-      sessionManager.startSession();
+      sessionManager.startSession(null);
     });
 
     it('should call DeviceStateService.getDeviceState', async () => {
@@ -251,7 +253,7 @@ describe('AnalyzeHandlerService', () => {
 
   describe('IoT Device Control (Req 4.1, 4.2)', () => {
     beforeEach(() => {
-      sessionManager.startSession();
+      sessionManager.startSession(null);
     });
 
     it('should call ActionDispatcher.dispatch with AI action', async () => {
@@ -297,7 +299,7 @@ describe('AnalyzeHandlerService', () => {
 
   describe('Duplicate Action Prevention (Req 4.5)', () => {
     beforeEach(() => {
-      sessionManager.startSession();
+      sessionManager.startSession(null);
     });
 
     it('should skip ActionDispatcher for duplicate device control action', async () => {
@@ -367,7 +369,7 @@ describe('AnalyzeHandlerService', () => {
 
   describe('Action History Recording', () => {
     beforeEach(() => {
-      sessionManager.startSession();
+      sessionManager.startSession(null);
     });
 
     it('should add executed action to session history', async () => {
@@ -390,7 +392,7 @@ describe('AnalyzeHandlerService', () => {
 
   describe('Next Interval Calculation (Req 4.3, 4.4)', () => {
     beforeEach(() => {
-      sessionManager.startSession();
+      sessionManager.startSession(null);
     });
 
     it('should return 10 seconds for continue_monitoring action', async () => {
@@ -468,7 +470,7 @@ describe('AnalyzeHandlerService', () => {
 
   describe('Result Structure', () => {
     beforeEach(() => {
-      sessionManager.startSession();
+      sessionManager.startSession(null);
     });
 
     it('should return complete AnalyzeResult structure', async () => {
@@ -514,7 +516,7 @@ describe('AnalyzeHandlerService', () => {
 
   describe('Logging (Req 6.4)', () => {
     beforeEach(() => {
-      sessionManager.startSession();
+      sessionManager.startSession(null);
       vi.spyOn(console, 'log').mockImplementation(() => {});
     });
 
@@ -542,7 +544,7 @@ describe('AnalyzeHandlerService', () => {
         { id: 'light-001', type: 'LIGHT' },
         { id: 'aircon-001', type: 'AC' },
       ];
-      sessionManager.startSession(allowedDevices);
+      sessionManager.startSession(null, allowedDevices);
 
       const deps: AnalyzeHandlerDependencies = {
         sessionManager,
@@ -559,7 +561,7 @@ describe('AnalyzeHandlerService', () => {
     });
 
     it('should call DynamicToolBuilder.generateTools with undefined when no allowed devices (backward compat)', async () => {
-      sessionManager.startSession(); // No allowed devices
+      sessionManager.startSession(null); // No allowed devices
 
       const deps: AnalyzeHandlerDependencies = {
         sessionManager,
@@ -579,7 +581,7 @@ describe('AnalyzeHandlerService', () => {
       const allowedDevices: AllowedDevice[] = [
         { id: 'light-001', type: 'LIGHT' },
       ];
-      sessionManager.startSession(allowedDevices);
+      sessionManager.startSession(null, allowedDevices);
 
       const deps: AnalyzeHandlerDependencies = {
         sessionManager,
@@ -599,7 +601,7 @@ describe('AnalyzeHandlerService', () => {
       const allowedDevices: AllowedDevice[] = [
         { id: 'light-001', type: 'LIGHT' },
       ];
-      sessionManager.startSession(allowedDevices);
+      sessionManager.startSession(null, allowedDevices);
 
       // Device state filtered by allowed devices (only light)
       const filteredDeviceState: FilteredDeviceState = {
@@ -632,7 +634,7 @@ describe('AnalyzeHandlerService', () => {
         { id: 'light-001', type: 'LIGHT' },
         // No AC allowed
       ];
-      sessionManager.startSession(allowedDevices);
+      sessionManager.startSession(null, allowedDevices);
 
       // Mock that only light_control + always tools are generated
       const lightOnlyTools: FunctionDeclaration[] = [
@@ -668,7 +670,7 @@ describe('AnalyzeHandlerService', () => {
       const allowedDevices: AllowedDevice[] = [
         { id: 'light-001', type: 'LIGHT' },
       ];
-      sessionManager.startSession(allowedDevices);
+      sessionManager.startSession(null, allowedDevices);
 
       const deps: AnalyzeHandlerDependencies = {
         sessionManager,
@@ -694,7 +696,7 @@ describe('AnalyzeHandlerService', () => {
 
     it('should work correctly with empty allowed devices (no device tools)', async () => {
       const allowedDevices: AllowedDevice[] = []; // Empty
-      sessionManager.startSession(allowedDevices);
+      sessionManager.startSession(null, allowedDevices);
 
       // Only always-included tools
       const alwaysOnlyTools: FunctionDeclaration[] = [
@@ -716,6 +718,139 @@ describe('AnalyzeHandlerService', () => {
 
       expect(result.ok).toBe(true);
       expect(dynamicToolBuilder.generateTools).toHaveBeenCalledWith(allowedDevices);
+    });
+  });
+
+  describe('Session-specific IoT Services (Task 6.3, Req 6.2, 6.4)', () => {
+    let mockLightService: LightService;
+    let mockAirconService: AirconService;
+    let sessionIoTServices: SessionIoTServices;
+
+    beforeEach(() => {
+      mockLightService = {
+        control: vi.fn().mockResolvedValue({ success: true, data: { applianceId: 'light-001', power: 'on' } }),
+        sendNamedSignal: vi.fn().mockResolvedValue({ success: true, data: { applianceId: 'light-001', signalName: 'test', success: true } }),
+      };
+      mockAirconService = {
+        setTemperature: vi.fn().mockResolvedValue({ success: true, data: { applianceId: 'ac-001', temperature: 26 } }),
+        powerOff: vi.fn().mockResolvedValue({ success: true, data: { applianceId: 'ac-001' } }),
+      };
+      sessionIoTServices = {
+        lightService: mockLightService,
+        airconService: mockAirconService,
+      };
+    });
+
+    it('should pass session IoT services to actionDispatcherFactory when session has IoT services', async () => {
+      // Start session with IoT services bound
+      const session = sessionManager.startSession(null, undefined, sessionIoTServices);
+
+      const deps: AnalyzeHandlerDependencies = {
+        sessionManager,
+        agentClient,
+        actionDispatcherFactory,
+        deviceStateService,
+      };
+      analyzeHandler = createAnalyzeHandler(deps);
+
+      // Analyze with sessionId
+      const result = await analyzeHandler.analyze(TEST_IMAGE, session.sessionId);
+
+      expect(result.ok).toBe(true);
+      // actionDispatcherFactory should receive session IoT services as second argument
+      expect(actionDispatcherFactory).toHaveBeenCalledWith(
+        expect.anything(), // allowedDevices
+        sessionIoTServices // session-specific IoT services
+      );
+    });
+
+    it('should pass undefined IoT services when session has no IoT services bound', async () => {
+      // Start session WITHOUT IoT services (guest mode)
+      const session = sessionManager.startSession(null);
+
+      const deps: AnalyzeHandlerDependencies = {
+        sessionManager,
+        agentClient,
+        actionDispatcherFactory,
+        deviceStateService,
+      };
+      analyzeHandler = createAnalyzeHandler(deps);
+
+      const result = await analyzeHandler.analyze(TEST_IMAGE, session.sessionId);
+
+      expect(result.ok).toBe(true);
+      // actionDispatcherFactory should receive undefined for IoT services (fallback to global)
+      expect(actionDispatcherFactory).toHaveBeenCalledWith(
+        expect.anything(),
+        undefined
+      );
+    });
+
+    it('should use session-specific allowed devices from getSession when sessionId is provided', async () => {
+      const allowedDevices: AllowedDevice[] = [
+        { id: 'light-001', type: 'LIGHT' },
+      ];
+      const session = sessionManager.startSession(null, allowedDevices, sessionIoTServices);
+
+      const deps: AnalyzeHandlerDependencies = {
+        sessionManager,
+        agentClient,
+        actionDispatcherFactory,
+        deviceStateService,
+      };
+      analyzeHandler = createAnalyzeHandler(deps);
+
+      const result = await analyzeHandler.analyze(TEST_IMAGE, session.sessionId);
+
+      expect(result.ok).toBe(true);
+      // Should use session's allowedDevices, not from getStatus()
+      expect(actionDispatcherFactory).toHaveBeenCalledWith(
+        allowedDevices,
+        sessionIoTServices
+      );
+    });
+
+    it('should return NO_ACTIVE_SESSION when sessionId is provided but session not found', async () => {
+      // Start a session so hasActiveSession() returns true
+      sessionManager.startSession(null);
+
+      const deps: AnalyzeHandlerDependencies = {
+        sessionManager,
+        agentClient,
+        actionDispatcherFactory,
+        deviceStateService,
+      };
+      analyzeHandler = createAnalyzeHandler(deps);
+
+      // Use a non-existent sessionId
+      const result = await analyzeHandler.analyze(TEST_IMAGE, 'non-existent-session-id');
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.code).toBe('NO_ACTIVE_SESSION');
+      }
+    });
+
+    it('should still work without sessionId (backward compatibility)', async () => {
+      sessionManager.startSession(null);
+
+      const deps: AnalyzeHandlerDependencies = {
+        sessionManager,
+        agentClient,
+        actionDispatcherFactory,
+        deviceStateService,
+      };
+      analyzeHandler = createAnalyzeHandler(deps);
+
+      // Call without sessionId - backward compatible
+      const result = await analyzeHandler.analyze(TEST_IMAGE);
+
+      expect(result.ok).toBe(true);
+      // Should still use getStatus() fallback
+      expect(actionDispatcherFactory).toHaveBeenCalledWith(
+        expect.anything(),
+        undefined // no session-specific IoT services without sessionId
+      );
     });
   });
 });

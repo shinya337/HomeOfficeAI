@@ -2,10 +2,10 @@
  * Session Handler Tests
  *
  * TDD tests for session API endpoints.
- * Requirements: 1.2, 1.4, 1.6, 5.5, 3.1, 3.2, 3.4
+ * Requirements: 1.2, 1.4, 1.6, 5.5, 3.1, 3.2, 3.4, 6.1, 6.2, 6.3, 6.5
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import express, { Express } from 'express';
+import express, { Express, Request, Response, NextFunction } from 'express';
 import request from 'supertest';
 import { createSessionRoutes, type SessionRouteDependencies } from './session-handler.js';
 import {
@@ -14,6 +14,9 @@ import {
 } from '../services/session-manager.js';
 import { resetSessionManager } from '../server.js';
 import type { Device } from '../types/device-types.js';
+import type { CredentialService } from '../services/credential-service.js';
+import type { AuthenticatedUser } from '../types/auth-types.js';
+import type { IoTServiceFactory } from './session-handler.js';
 
 describe('Session Handler', () => {
   let app: Express;
@@ -167,9 +170,13 @@ describe('Session Handler', () => {
         getStatus: () => {
           throw new Error('Internal error');
         },
+        getSession: () => undefined,
+        getActiveSessionByUid: () => undefined,
         hasActiveSession: () => false,
         addRecentAction: () => {},
         getRecentActions: () => [],
+        getSessionIoTServices: () => undefined,
+        cleanupExpiredSessions: () => {},
       };
 
       const errorApp = express();
@@ -195,15 +202,19 @@ describe('Session Handler', () => {
         startSession: () => {
           throw new Error('Internal error');
         },
-        endSession: () => ({ ok: false, error: { code: 'NO_ACTIVE_SESSION', message: 'error' } }),
+        endSession: () => ({ ok: false, error: { code: 'SESSION_NOT_FOUND' as const, message: 'error' } }),
         getStatus: () => {
           throw new Error('Internal error');
         },
+        getSession: () => undefined,
+        getActiveSessionByUid: () => undefined,
         hasActiveSession: () => {
           throw new Error('Internal error');
         },
         addRecentAction: () => {},
         getRecentActions: () => [],
+        getSessionIoTServices: () => undefined,
+        cleanupExpiredSessions: () => {},
       };
 
       const errorApp = express();
@@ -340,6 +351,400 @@ describe('Session Handler', () => {
 
       expect(statusResponse.body.hasActiveSession).toBe(true);
       expect(statusResponse.body.session.allowedDevices).toBeUndefined();
+    });
+  });
+
+  /**
+   * Tests for IoT client dynamic generation at session start
+   * Task 6.2, Requirements: 6.1, 6.2, 6.3, 6.5
+   */
+  describe('POST /api/session/start with IoT client dynamic generation', () => {
+    const testUser: AuthenticatedUser = {
+      uid: 'test-uid-123',
+      email: 'test@example.com',
+      displayName: 'Test User',
+      photoURL: undefined,
+    };
+
+    const mockLightService = {
+      control: vi.fn().mockResolvedValue({ success: true, data: { applianceId: 'light-1', power: 'on' } }),
+      sendNamedSignal: vi.fn().mockResolvedValue({ success: true, data: { applianceId: 'light-1', signalName: 'test', success: true } }),
+    };
+
+    const mockAirconService = {
+      setTemperature: vi.fn().mockResolvedValue({ success: true, data: { applianceId: 'ac-1', temperature: 25 } }),
+      powerOff: vi.fn().mockResolvedValue({ success: true, data: { applianceId: 'ac-1' } }),
+    };
+
+    /**
+     * Middleware that simulates auth middleware by setting req.user
+     */
+    function fakeAuthMiddleware(user: AuthenticatedUser | null) {
+      return (req: Request, _res: Response, next: NextFunction) => {
+        (req as unknown as { user: AuthenticatedUser | null }).user = user;
+        next();
+      };
+    }
+
+    /**
+     * Create test app with credential service and IoT factory for IoT dynamic generation tests
+     */
+    function createTestAppWithCredentials(options: {
+      user: AuthenticatedUser | null;
+      credentialService: CredentialService;
+      iotServiceFactory: IoTServiceFactory;
+    }): Express {
+      const testApp = express();
+      testApp.use(express.json());
+      testApp.use(fakeAuthMiddleware(options.user));
+
+      const deps: SessionRouteDependencies = {
+        sessionManager: createSessionManager(),
+        getCachedDevices: () => testDevices,
+        credentialService: options.credentialService,
+        iotServiceFactory: options.iotServiceFactory,
+      };
+      testApp.use('/api/session', createSessionRoutes(deps));
+      return testApp;
+    }
+
+    it('should use global IoT client for guest mode (no req.user)', async () => {
+      const mockCredentialService: CredentialService = {
+        getDecryptedToken: vi.fn(),
+        saveToken: vi.fn(),
+        getStatus: vi.fn(),
+        deleteToken: vi.fn(),
+        deleteAllForUser: vi.fn(),
+      };
+      const mockFactory: IoTServiceFactory = vi.fn();
+
+      const testApp = createTestAppWithCredentials({
+        user: null,
+        credentialService: mockCredentialService,
+        iotServiceFactory: mockFactory,
+      });
+
+      const response = await request(testApp)
+        .post('/api/session/start')
+        .expect(200);
+
+      expect(response.body.status).toBe('active');
+      // Guest mode: credentialService should NOT be called
+      expect(mockCredentialService.getDecryptedToken).not.toHaveBeenCalled();
+      // Guest mode: iotServiceFactory should NOT be called
+      expect(mockFactory).not.toHaveBeenCalled();
+    });
+
+    it('should create user-specific IoT services when user has a valid token', async () => {
+      const mockCredentialService: CredentialService = {
+        getDecryptedToken: vi.fn().mockResolvedValue({
+          ok: true,
+          value: 'user-nature-remo-token',
+        }),
+        saveToken: vi.fn(),
+        getStatus: vi.fn(),
+        deleteToken: vi.fn(),
+        deleteAllForUser: vi.fn(),
+      };
+
+      const mockFactory: IoTServiceFactory = vi.fn().mockResolvedValue({
+        ok: true,
+        value: {
+          lightService: mockLightService,
+          airconService: mockAirconService,
+        },
+      });
+
+      const testApp = createTestAppWithCredentials({
+        user: testUser,
+        credentialService: mockCredentialService,
+        iotServiceFactory: mockFactory,
+      });
+
+      const response = await request(testApp)
+        .post('/api/session/start')
+        .expect(200);
+
+      expect(response.body.status).toBe('active');
+      // Should have called credentialService to get the token
+      expect(mockCredentialService.getDecryptedToken).toHaveBeenCalledWith(
+        'test-uid-123',
+        'nature-remo'
+      );
+      // Should have called factory with the user token
+      expect(mockFactory).toHaveBeenCalledWith('user-nature-remo-token');
+    });
+
+    it('should fallback to global IoT client when user token is NOT_FOUND', async () => {
+      const mockCredentialService: CredentialService = {
+        getDecryptedToken: vi.fn().mockResolvedValue({
+          ok: false,
+          error: { code: 'NOT_FOUND', message: 'クレデンシャルが見つかりません: nature-remo' },
+        }),
+        saveToken: vi.fn(),
+        getStatus: vi.fn(),
+        deleteToken: vi.fn(),
+        deleteAllForUser: vi.fn(),
+      };
+
+      const mockFactory: IoTServiceFactory = vi.fn();
+
+      const testApp = createTestAppWithCredentials({
+        user: testUser,
+        credentialService: mockCredentialService,
+        iotServiceFactory: mockFactory,
+      });
+
+      const response = await request(testApp)
+        .post('/api/session/start')
+        .expect(200);
+
+      expect(response.body.status).toBe('active');
+      // Should have tried to get the token
+      expect(mockCredentialService.getDecryptedToken).toHaveBeenCalledWith(
+        'test-uid-123',
+        'nature-remo'
+      );
+      // Should NOT have called factory (fallback to global)
+      expect(mockFactory).not.toHaveBeenCalled();
+    });
+
+    it('should return error and abort session when user token is invalid (API error)', async () => {
+      const mockCredentialService: CredentialService = {
+        getDecryptedToken: vi.fn().mockResolvedValue({
+          ok: true,
+          value: 'invalid-token',
+        }),
+        saveToken: vi.fn(),
+        getStatus: vi.fn(),
+        deleteToken: vi.fn(),
+        deleteAllForUser: vi.fn(),
+      };
+
+      const mockFactory: IoTServiceFactory = vi.fn().mockResolvedValue({
+        ok: false,
+        error: { code: 'INVALID_TOKEN', message: 'Nature Remo APIエラー: 401 Unauthorized' },
+      });
+
+      const testApp = createTestAppWithCredentials({
+        user: testUser,
+        credentialService: mockCredentialService,
+        iotServiceFactory: mockFactory,
+      });
+
+      const response = await request(testApp)
+        .post('/api/session/start')
+        .expect(400);
+
+      expect(response.body).toHaveProperty('error');
+      expect(response.body.error.code).toBe('INVALID_IOT_TOKEN');
+      expect(response.body.error.message).toContain('Nature Remo');
+    });
+
+    it('should pass IoT services to session manager when user has valid token', async () => {
+      const localSessionManager = createSessionManager();
+      const mockCredentialService: CredentialService = {
+        getDecryptedToken: vi.fn().mockResolvedValue({
+          ok: true,
+          value: 'user-nature-remo-token',
+        }),
+        saveToken: vi.fn(),
+        getStatus: vi.fn(),
+        deleteToken: vi.fn(),
+        deleteAllForUser: vi.fn(),
+      };
+
+      const mockFactory: IoTServiceFactory = vi.fn().mockResolvedValue({
+        ok: true,
+        value: {
+          lightService: mockLightService,
+          airconService: mockAirconService,
+        },
+      });
+
+      const testApp = express();
+      testApp.use(express.json());
+      testApp.use(fakeAuthMiddleware(testUser));
+      testApp.use('/api/session', createSessionRoutes({
+        sessionManager: localSessionManager,
+        getCachedDevices: () => testDevices,
+        credentialService: mockCredentialService,
+        iotServiceFactory: mockFactory,
+      }));
+
+      const response = await request(testApp)
+        .post('/api/session/start')
+        .expect(200);
+
+      // Verify the session has IoT services bound
+      const sessionId = response.body.sessionId as string;
+      const iotServices = localSessionManager.getSessionIoTServices(sessionId);
+      expect(iotServices).toBeDefined();
+      expect(iotServices?.lightService).toBe(mockLightService);
+      expect(iotServices?.airconService).toBe(mockAirconService);
+    });
+
+    it('should not bind IoT services to session for guest mode', async () => {
+      const localSessionManager = createSessionManager();
+      const mockCredentialService: CredentialService = {
+        getDecryptedToken: vi.fn(),
+        saveToken: vi.fn(),
+        getStatus: vi.fn(),
+        deleteToken: vi.fn(),
+        deleteAllForUser: vi.fn(),
+      };
+      const mockFactory: IoTServiceFactory = vi.fn();
+
+      const testApp = express();
+      testApp.use(express.json());
+      testApp.use(fakeAuthMiddleware(null));
+      testApp.use('/api/session', createSessionRoutes({
+        sessionManager: localSessionManager,
+        getCachedDevices: () => testDevices,
+        credentialService: mockCredentialService,
+        iotServiceFactory: mockFactory,
+      }));
+
+      const response = await request(testApp)
+        .post('/api/session/start')
+        .expect(200);
+
+      // Verify no IoT services bound to session
+      const sessionId = response.body.sessionId as string;
+      const iotServices = localSessionManager.getSessionIoTServices(sessionId);
+      expect(iotServices).toBeUndefined();
+    });
+
+    it('should not bind IoT services when token is NOT_FOUND (fallback to global)', async () => {
+      const localSessionManager = createSessionManager();
+      const mockCredentialService: CredentialService = {
+        getDecryptedToken: vi.fn().mockResolvedValue({
+          ok: false,
+          error: { code: 'NOT_FOUND', message: 'not found' },
+        }),
+        saveToken: vi.fn(),
+        getStatus: vi.fn(),
+        deleteToken: vi.fn(),
+        deleteAllForUser: vi.fn(),
+      };
+      const mockFactory: IoTServiceFactory = vi.fn();
+
+      const testApp = express();
+      testApp.use(express.json());
+      testApp.use(fakeAuthMiddleware(testUser));
+      testApp.use('/api/session', createSessionRoutes({
+        sessionManager: localSessionManager,
+        getCachedDevices: () => testDevices,
+        credentialService: mockCredentialService,
+        iotServiceFactory: mockFactory,
+      }));
+
+      const response = await request(testApp)
+        .post('/api/session/start')
+        .expect(200);
+
+      // Verify no IoT services bound (global fallback)
+      const sessionId = response.body.sessionId as string;
+      const iotServices = localSessionManager.getSessionIoTServices(sessionId);
+      expect(iotServices).toBeUndefined();
+    });
+
+    it('should pass uid to session manager for authenticated user', async () => {
+      const localSessionManager = createSessionManager();
+      const mockCredentialService: CredentialService = {
+        getDecryptedToken: vi.fn().mockResolvedValue({
+          ok: false,
+          error: { code: 'NOT_FOUND', message: 'not found' },
+        }),
+        saveToken: vi.fn(),
+        getStatus: vi.fn(),
+        deleteToken: vi.fn(),
+        deleteAllForUser: vi.fn(),
+      };
+      const mockFactory: IoTServiceFactory = vi.fn();
+
+      const testApp = express();
+      testApp.use(express.json());
+      testApp.use(fakeAuthMiddleware(testUser));
+      testApp.use('/api/session', createSessionRoutes({
+        sessionManager: localSessionManager,
+        getCachedDevices: () => testDevices,
+        credentialService: mockCredentialService,
+        iotServiceFactory: mockFactory,
+      }));
+
+      const response = await request(testApp)
+        .post('/api/session/start')
+        .expect(200);
+
+      // Verify session has uid set
+      const session = localSessionManager.getSession(response.body.sessionId as string);
+      expect(session?.uid).toBe('test-uid-123');
+    });
+
+    it('should pass uid as null for guest mode', async () => {
+      const localSessionManager = createSessionManager();
+
+      const testApp = express();
+      testApp.use(express.json());
+      testApp.use(fakeAuthMiddleware(null));
+      testApp.use('/api/session', createSessionRoutes({
+        sessionManager: localSessionManager,
+        getCachedDevices: () => testDevices,
+      }));
+
+      const response = await request(testApp)
+        .post('/api/session/start')
+        .expect(200);
+
+      // Verify session has uid null for guest
+      const session = localSessionManager.getSession(response.body.sessionId as string);
+      expect(session?.uid).toBeNull();
+    });
+
+    it('should fallback to global when credential service encounters Firestore error', async () => {
+      const mockCredentialService: CredentialService = {
+        getDecryptedToken: vi.fn().mockResolvedValue({
+          ok: false,
+          error: { code: 'FIRESTORE_ERROR', message: 'Firestore接続エラー' },
+        }),
+        saveToken: vi.fn(),
+        getStatus: vi.fn(),
+        deleteToken: vi.fn(),
+        deleteAllForUser: vi.fn(),
+      };
+      const mockFactory: IoTServiceFactory = vi.fn();
+
+      const testApp = createTestAppWithCredentials({
+        user: testUser,
+        credentialService: mockCredentialService,
+        iotServiceFactory: mockFactory,
+      });
+
+      const response = await request(testApp)
+        .post('/api/session/start')
+        .expect(200);
+
+      // Firestore error => graceful fallback to global
+      expect(response.body.status).toBe('active');
+      expect(mockFactory).not.toHaveBeenCalled();
+    });
+
+    it('should work without credential service (backward compatibility)', async () => {
+      // No credential service or factory provided (old deps format)
+      const testApp = express();
+      testApp.use(express.json());
+      testApp.use(fakeAuthMiddleware(testUser));
+      testApp.use('/api/session', createSessionRoutes({
+        sessionManager: createSessionManager(),
+        getCachedDevices: () => testDevices,
+      }));
+
+      const response = await request(testApp)
+        .post('/api/session/start')
+        .expect(200);
+
+      expect(response.body.status).toBe('active');
     });
   });
 });

@@ -4,8 +4,12 @@ node_modules/
 # Build output
 dist/
 
+# Documentation (generated)
+docs/
+
 # Environment / secrets
 .env
+.env.local
 .alexa-cookie.json
 
 # Test images (private)

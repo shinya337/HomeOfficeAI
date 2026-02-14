@@ -41,9 +41,13 @@ export interface ImageData {
 
 /**
  * Analyze request for POST /api/analyze
+ * sessionId is optional for backward compatibility; when provided, the session-specific
+ * IoT services are used instead of global services.
+ * Task 6.3, Requirements: 6.2, 6.4
  */
 export interface AnalyzeRequest {
   readonly image: ImageData;
+  readonly sessionId?: string;
 }
 
 /**

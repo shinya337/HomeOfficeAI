@@ -42,7 +42,7 @@ describe('SessionController', () => {
   let mockCallbacks;
 
   beforeEach(() => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({ shouldAdvanceTime: true });
 
     // Create a mock video element
     mockVideoElement = {

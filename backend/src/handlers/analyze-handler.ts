@@ -117,6 +117,20 @@ export function createAnalyzeRoutes(deps: AnalyzeHandlerDependencies): Router {
         return;
       }
 
+      // Step 1.5: Validate sessionId if provided (Task 6.3)
+      const requestBody = req.body as Record<string, unknown>;
+      const requestSessionId = typeof requestBody.sessionId === 'string' ? requestBody.sessionId : undefined;
+      if (requestSessionId !== undefined && sessionManager.getSession(requestSessionId) === undefined) {
+        const errorResponse: ErrorResponse = {
+          error: {
+            code: ErrorCodes.NO_ACTIVE_SESSION,
+            message: `Session not found: ${requestSessionId}`,
+          },
+        };
+        res.status(400).json(errorResponse);
+        return;
+      }
+
       // Step 2: Validate request body
       const validationError = validateAnalyzeRequest(req.body);
       if (validationError !== null) {
@@ -136,8 +150,9 @@ export function createAnalyzeRoutes(deps: AnalyzeHandlerDependencies): Router {
         mimeType: analyzeRequest.image.mimeType,
       };
 
-      // Step 3: Call analyze handler
-      const result = await analyzeHandler.analyze(imageData);
+      // Step 3: Call analyze handler with optional sessionId (Task 6.3)
+      const sessionId = analyzeRequest.sessionId;
+      const result = await analyzeHandler.analyze(imageData, sessionId);
 
       // Step 4: Handle result
       if (!result.ok) {

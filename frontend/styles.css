@@ -1102,6 +1102,275 @@ body {
   border-color: white;
 }
 
+/* ===== Auth UI ===== */
+
+/* Auth UI コンテナ（ヘッダー右上、設定ボタンの左側） */
+.auth-ui {
+  position: absolute;
+  top: 20px;
+  right: 68px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Googleログインボタン */
+.auth-login-button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  background: rgba(255, 255, 255, 0.2);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 8px;
+  color: white;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.auth-login-button:hover {
+  background: rgba(255, 255, 255, 0.3);
+  border-color: white;
+}
+
+.auth-login-button svg {
+  flex-shrink: 0;
+}
+
+.auth-login-text {
+  font-weight: 500;
+}
+
+/* ゲストモードバッジ */
+.auth-guest-badge {
+  font-size: 0.7rem;
+  padding: 3px 8px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.15);
+  color: rgba(255, 255, 255, 0.7);
+  font-weight: 500;
+  letter-spacing: 0.03em;
+}
+
+/* ログイン済みユーザー情報 */
+.auth-user-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.auth-user-avatar-container {
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+}
+
+.auth-user-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.6);
+  object-fit: cover;
+}
+
+.auth-user-avatar-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.25);
+  color: white;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.auth-user-name {
+  color: white;
+  font-size: 0.85rem;
+  font-weight: 500;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ドロップダウンメニュー */
+.auth-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 200px;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  overflow: hidden;
+  z-index: 30;
+}
+
+.auth-dropdown-header {
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.auth-dropdown-name {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.auth-dropdown-email {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.auth-dropdown-divider {
+  height: 1px;
+  background: var(--border);
+}
+
+.auth-dropdown-logout {
+  display: block;
+  width: 100%;
+  padding: 10px 16px;
+  background: transparent;
+  border: none;
+  text-align: left;
+  font-size: 0.85rem;
+  color: var(--text);
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.auth-dropdown-logout:hover {
+  background: var(--bg);
+}
+
+/* ===== Credential Settings ===== */
+
+.credential-settings-section {
+  margin-top: 4px;
+}
+
+.credential-login-prompt {
+  padding: 12px 0;
+}
+
+.credential-login-prompt-text {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.credential-form {
+  padding: 4px 0;
+}
+
+.credential-service-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.credential-service-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.credential-service-label {
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.credential-configured-status {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.credential-input-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.credential-token-input {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.85rem;
+  background: white;
+  color: var(--text);
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.credential-token-input:focus {
+  border-color: #3b82f6;
+}
+
+.credential-token-input::placeholder {
+  color: #999;
+}
+
+.credential-save-button,
+.credential-delete-button {
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  background: transparent;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.credential-save-button:hover {
+  background: var(--button-bg);
+  color: var(--button-text);
+  border-color: var(--button-bg);
+}
+
+.credential-delete-button {
+  color: #d32f2f;
+  border-color: #e0c0c0;
+}
+
+.credential-delete-button:hover {
+  background: #d32f2f;
+  color: white;
+  border-color: #d32f2f;
+}
+
+.credential-feedback-container {
+  min-height: 0;
+}
+
+.credential-feedback {
+  font-size: 0.8rem;
+  padding: 6px 10px;
+  border-radius: 6px;
+  margin-top: 4px;
+}
+
+.credential-feedback-success {
+  background: #e8f5e8;
+  color: #2e7d32;
+}
+
+.credential-feedback-error {
+  background: #fde8e8;
+  color: #c62828;
+}
+
 /* レスポンシブ */
 @media (max-width: 640px) {
   .office {
@@ -1150,5 +1419,17 @@ body {
   .settings-item-status {
     width: 100%;
     justify-content: space-between;
+  }
+
+  .auth-ui {
+    right: 56px;
+  }
+
+  .auth-user-name {
+    display: none;
+  }
+
+  .auth-login-text {
+    display: none;
   }
 }

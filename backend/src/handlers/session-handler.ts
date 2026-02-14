@@ -2,7 +2,7 @@
  * Session Handler
  *
  * Express routes for session management API endpoints.
- * Requirements: 1.2, 1.4, 1.6, 5.5, 3.1, 3.2, 3.4
+ * Requirements: 1.2, 1.4, 1.6, 5.5, 3.1, 3.2, 3.4, 6.1, 6.2, 6.3, 6.5
  *
  * Endpoints:
  * - POST /api/session/start - Start a new session (with optional allowedDeviceIds)
@@ -19,6 +19,31 @@ import type {
 import { ErrorCodes } from '../types/api-types.js';
 import type { Device, AllowedDevice } from '../types/device-types.js';
 import type { AlexaService } from '../config/component-imports.js';
+import type { CredentialService } from '../services/credential-service.js';
+import type { SessionIoTServices } from '../types/session-types.js';
+import type { AuthenticatedUser } from '../types/auth-types.js';
+import type { Result } from '../types/action-types.js';
+
+/**
+ * Error type for IoT service factory
+ */
+export interface IoTServiceFactoryError {
+  readonly code: 'INVALID_TOKEN' | 'SERVICE_ERROR';
+  readonly message: string;
+}
+
+/**
+ * Factory function to create IoT services from a user's Nature Remo token.
+ * Called during session start when a logged-in user has a stored token.
+ *
+ * @param token - Decrypted Nature Remo token
+ * @returns Result with SessionIoTServices on success, error on failure
+ *
+ * Task 6.2, Requirements: 6.2, 6.5
+ */
+export type IoTServiceFactory = (
+  token: string
+) => Promise<Result<SessionIoTServices, IoTServiceFactoryError>>;
 
 /**
  * Dependencies for session routes
@@ -27,6 +52,10 @@ export interface SessionRouteDependencies {
   readonly sessionManager: SessionManagerService;
   readonly getCachedDevices: () => readonly Device[] | null;
   readonly alexaService?: AlexaService | null;
+  /** Credential service for fetching user IoT tokens (Task 6.2) */
+  readonly credentialService?: CredentialService;
+  /** Factory for creating user-specific IoT services from a token (Task 6.2) */
+  readonly iotServiceFactory?: IoTServiceFactory;
 }
 
 /**
@@ -68,7 +97,7 @@ function sendAlexaAnnouncement(alexaService: AlexaService, message: string): voi
     console.warn('[Session] No Alexa devices available for announcement');
     return;
   }
-  const serial = devicesResult.data[0].serialNumber;
+  const serial = devicesResult.data[0]!.serialNumber;
   alexaService.announce(serial, message).catch((err) => {
     console.error('[Session] Alexa announcement failed:', err);
   });
@@ -146,18 +175,18 @@ export function createSessionRoutes(
   deps: SessionRouteDependencies | SessionManagerService
 ): Router {
   // Support both old and new signatures for backward compatibility
-  const { sessionManager, getCachedDevices, alexaService } = isSessionRouteDependencies(deps)
-    ? { ...deps, alexaService: deps.alexaService ?? null }
-    : { sessionManager: deps, getCachedDevices: () => null, alexaService: null };
+  const { sessionManager, getCachedDevices, alexaService, credentialService, iotServiceFactory } = isSessionRouteDependencies(deps)
+    ? { ...deps, alexaService: deps.alexaService ?? null, credentialService: deps.credentialService, iotServiceFactory: deps.iotServiceFactory }
+    : { sessionManager: deps, getCachedDevices: () => null, alexaService: null, credentialService: undefined, iotServiceFactory: undefined };
 
   const router = Router();
 
   /**
    * POST /api/session/start
    * Start a new session with optional allowed devices
-   * Requirements: 1.2, 3.1, 3.4
+   * Requirements: 1.2, 3.1, 3.4, 6.1, 6.2, 6.3, 6.5
    */
-  router.post('/start', (req: Request, res: Response) => {
+  router.post('/start', async (req: Request, res: Response) => {
     try {
       const body = req.body as StartSessionRequestBody | undefined;
       const allowedDeviceIds = body?.allowedDeviceIds;
@@ -209,8 +238,41 @@ export function createSessionRoutes(
         }
       }
 
-      // Start session with or without allowed devices
-      const session = sessionManager.startSession(allowedDevices);
+      // Resolve user identity from auth middleware (Task 6.2, Requirements: 6.1, 6.2, 6.3, 6.5)
+      const user = (req as unknown as { user?: AuthenticatedUser | null }).user;
+      const uid = user?.uid ?? null;
+
+      // Resolve IoT services for the session
+      let sessionIoTServices: SessionIoTServices | undefined;
+
+      if (uid !== null && credentialService !== undefined && iotServiceFactory !== undefined) {
+        // Authenticated user: attempt to load user-specific IoT token
+        const tokenResult = await credentialService.getDecryptedToken(uid, 'nature-remo');
+
+        if (tokenResult.ok) {
+          // Token found: create user-specific IoT services
+          const factoryResult = await iotServiceFactory(tokenResult.value);
+
+          if (factoryResult.ok) {
+            sessionIoTServices = factoryResult.value;
+          } else {
+            // Token invalid (Nature Remo API error): abort session start (Requirement 6.5)
+            const errorResponse: ErrorResponse = {
+              error: {
+                code: 'INVALID_IOT_TOKEN',
+                message: factoryResult.error.message,
+              },
+            };
+            res.status(400).json(errorResponse);
+            return;
+          }
+        }
+        // If token NOT_FOUND or FIRESTORE_ERROR: sessionIoTServices remains undefined (fallback to global)
+      }
+      // Guest mode (uid === null): sessionIoTServices remains undefined (use global)
+
+      // Start session with user identity and optional IoT services
+      const session = sessionManager.startSession(uid, allowedDevices, sessionIoTServices);
       const response = buildSessionResponse(session);
 
       // Alexa announcement on session start (fire-and-forget)
@@ -235,12 +297,27 @@ export function createSessionRoutes(
 
   /**
    * POST /api/session/end
-   * End the current session
+   * End a session by sessionId (or the first active session for backward compatibility)
    * Requirements: 1.4, 5.5 (400 error when no active session)
    */
-  router.post('/end', (_req: Request, res: Response) => {
+  router.post('/end', (req: Request, res: Response) => {
     try {
-      const result = sessionManager.endSession();
+      // Support sessionId in request body; fall back to first active session
+      const bodySessionId = (req.body as { sessionId?: string } | undefined)?.sessionId;
+      const targetSessionId = bodySessionId ?? sessionManager.getStatus()?.sessionId;
+
+      if (targetSessionId === undefined) {
+        const errorResponse: ErrorResponse = {
+          error: {
+            code: ErrorCodes.NO_ACTIVE_SESSION,
+            message: 'No active session to end',
+          },
+        };
+        res.status(400).json(errorResponse);
+        return;
+      }
+
+      const result = sessionManager.endSession(targetSessionId);
 
       if (!result.ok) {
         const errorResponse: ErrorResponse = {

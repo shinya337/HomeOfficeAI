@@ -19,6 +19,9 @@ export default {
       },
     },
   },
+  optimizeDeps: {
+    include: ['firebase/app', 'firebase/auth'],
+  },
   test: {
     environment: 'jsdom',
   },

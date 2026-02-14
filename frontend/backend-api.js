@@ -4,11 +4,12 @@
  * Provides functions to communicate with the backend REST API.
  * Uses the Fetch API for HTTP requests.
  *
- * Requirements: 1.1, 1.3, 2.1, 2.3
+ * Requirements: 1.1, 1.3, 2.1, 2.3, 3.1
  * - 1.1: Session start API call (POST /api/session/start)
  * - 1.3: Session end API call (POST /api/session/end)
  * - 2.1: Device list API call (GET /api/devices)
  * - 2.3: Image analysis API call (POST /api/analyze)
+ * - 3.1: Firebase IDトークンをAuthorizationヘッダーに付与
  */
 
 /**
@@ -43,6 +44,65 @@ const API_BASE = '';
 const DEFAULT_HEADERS = {
   'Content-Type': 'application/json',
 };
+
+/**
+ * Auth token provider function (set via setAuthTokenProvider)
+ * @type {(() => Promise<string|null>) | null}
+ */
+let authTokenProvider = null;
+
+/**
+ * Current session ID (stored from startSession response, cleared on endSession)
+ * @type {string|null}
+ */
+let currentSessionId = null;
+
+/**
+ * Set the auth token provider function.
+ * When set, the provider is called before every API request to get a fresh
+ * Firebase ID token. The token is added as an Authorization: Bearer header.
+ * Pass null to clear (guest mode).
+ *
+ * @param {(() => Promise<string|null>) | null} getIdToken - Function that returns a Firebase ID token, or null
+ */
+export function setAuthTokenProvider(getIdToken) {
+  authTokenProvider = getIdToken;
+}
+
+/**
+ * Get the current session ID.
+ * Returns null when no session is active.
+ *
+ * @returns {string|null}
+ */
+export function getSessionId() {
+  return currentSessionId;
+}
+
+/**
+ * Clear the current session ID.
+ * Used when logging out or resetting state.
+ */
+export function clearSessionId() {
+  currentSessionId = null;
+}
+
+/**
+ * Build headers for an API request, including Authorization if available.
+ * @returns {Promise<Object>} Headers object
+ */
+async function buildHeaders() {
+  const headers = { ...DEFAULT_HEADERS };
+
+  if (authTokenProvider) {
+    const token = await authTokenProvider();
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+  }
+
+  return headers;
+}
 
 /**
  * Helper function to handle API responses
@@ -85,9 +145,10 @@ async function handleResponse(response) {
  */
 export async function startSession(allowedDeviceIds, deviceToolOverrides) {
   try {
+    const headers = await buildHeaders();
     const fetchOptions = {
       method: 'POST',
-      headers: DEFAULT_HEADERS,
+      headers,
     };
 
     // Only include body when allowedDeviceIds is provided (including empty array)
@@ -101,7 +162,14 @@ export async function startSession(allowedDeviceIds, deviceToolOverrides) {
 
     const response = await fetch(`${API_BASE}/api/session/start`, fetchOptions);
 
-    return handleResponse(response);
+    const data = await handleResponse(response);
+
+    // Store sessionId for subsequent requests (analyze, session/end)
+    if (data.sessionId) {
+      currentSessionId = data.sessionId;
+    }
+
+    return data;
   } catch (error) {
     if (error instanceof ApiError) {
       throw error;
@@ -121,12 +189,25 @@ export async function startSession(allowedDeviceIds, deviceToolOverrides) {
  */
 export async function endSession() {
   try {
-    const response = await fetch(`${API_BASE}/api/session/end`, {
+    const headers = await buildHeaders();
+    const fetchOptions = {
       method: 'POST',
-      headers: DEFAULT_HEADERS,
-    });
+      headers,
+    };
 
-    return handleResponse(response);
+    // Include sessionId in request body if available
+    if (currentSessionId) {
+      fetchOptions.body = JSON.stringify({ sessionId: currentSessionId });
+    }
+
+    const response = await fetch(`${API_BASE}/api/session/end`, fetchOptions);
+
+    const data = await handleResponse(response);
+
+    // Clear sessionId after successful end
+    currentSessionId = null;
+
+    return data;
   } catch (error) {
     if (error instanceof ApiError) {
       throw error;
@@ -183,17 +264,25 @@ function detectMimeType(base64) {
  */
 export async function analyze(base64Image) {
   try {
+    const headers = await buildHeaders();
     const mimeType = detectMimeType(base64Image);
+
+    const bodyObj = {
+      image: {
+        base64: base64Image,
+        mimeType: mimeType,
+      },
+    };
+
+    // Include sessionId if available
+    if (currentSessionId) {
+      bodyObj.sessionId = currentSessionId;
+    }
 
     const response = await fetch(`${API_BASE}/api/analyze`, {
       method: 'POST',
-      headers: DEFAULT_HEADERS,
-      body: JSON.stringify({
-        image: {
-          base64: base64Image,
-          mimeType: mimeType,
-        },
-      }),
+      headers,
+      body: JSON.stringify(bodyObj),
     });
 
     return handleResponse(response);
@@ -224,9 +313,11 @@ export async function analyze(base64Image) {
  */
 export async function getDevices() {
   try {
+    const headers = await buildHeaders();
+
     const response = await fetch(`${API_BASE}/api/devices`, {
       method: 'GET',
-      headers: DEFAULT_HEADERS,
+      headers,
     });
 
     return handleResponse(response);
@@ -255,11 +346,92 @@ export async function getDevices() {
  */
 export async function getSessionStatus() {
   try {
+    const headers = await buildHeaders();
+
     const response = await fetch(`${API_BASE}/api/session/status`, {
       method: 'GET',
-      headers: DEFAULT_HEADERS,
+      headers,
     });
 
+    return handleResponse(response);
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
+    throw new ApiError('NETWORK_ERROR', error.message);
+  }
+}
+
+/**
+ * Save an IoT credential token for the specified service
+ *
+ * Calls PUT /api/credentials/:service with the token.
+ * Requires authentication.
+ *
+ * @param {string} service - Service name (e.g., 'nature-remo')
+ * @param {string} token - The token value to save
+ * @returns {Promise<{ok: boolean}>} Save result
+ * @throws {ApiError} On validation error (400), auth error (401), or server error (500)
+ */
+export async function saveCredential(service, token) {
+  try {
+    const headers = await buildHeaders();
+    const response = await fetch(`${API_BASE}/api/credentials/${service}`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ token }),
+    });
+    return handleResponse(response);
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
+    throw new ApiError('NETWORK_ERROR', error.message);
+  }
+}
+
+/**
+ * Get credential configuration status for all services
+ *
+ * Calls GET /api/credentials/status.
+ * Requires authentication. Does not return raw token values.
+ *
+ * @returns {Promise<{credentials: Array<{service: string, configured: boolean, updatedAt?: string}>}>} Credential status
+ * @throws {ApiError} On auth error (401) or server error (500)
+ */
+export async function getCredentialStatus() {
+  try {
+    const headers = await buildHeaders();
+    const response = await fetch(`${API_BASE}/api/credentials/status`, {
+      method: 'GET',
+      headers,
+    });
+    return handleResponse(response);
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
+    throw new ApiError('NETWORK_ERROR', error.message);
+  }
+}
+
+/**
+ * Delete an IoT credential for the specified service
+ *
+ * Calls DELETE /api/credentials/:service.
+ * Requires authentication.
+ *
+ * @param {string} service - Service name (e.g., 'nature-remo')
+ * @returns {Promise<{ok: boolean}>} Delete result
+ * @throws {ApiError} On auth error (401), not found (404), or server error (500)
+ */
+export async function deleteCredential(service) {
+  try {
+    const headers = await buildHeaders();
+    const response = await fetch(`${API_BASE}/api/credentials/${service}`, {
+      method: 'DELETE',
+      headers,
+    });
     return handleResponse(response);
   } catch (error) {
     if (error instanceof ApiError) {

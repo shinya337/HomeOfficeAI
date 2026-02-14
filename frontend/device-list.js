@@ -264,8 +264,10 @@ function showError(element, error) {
 function showEmpty(element) {
   const loading = element.querySelector('.device-list-loading');
   const emptyMessage = element.querySelector('.device-list-empty');
+  const itemsContainer = element.querySelector('.device-list-items');
 
   loading.style.display = 'none';
+  itemsContainer.innerHTML = '';
   emptyMessage.style.display = 'block';
 }
 

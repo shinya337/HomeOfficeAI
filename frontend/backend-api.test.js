@@ -4,7 +4,7 @@
  * TDD tests for API client functions that communicate with the backend.
  * Tests use mocked fetch to verify correct request/response handling.
  *
- * Requirements: 1.1, 1.3, 2.1, 2.3
+ * Requirements: 1.1, 1.3, 2.1, 2.3, 3.1
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -14,13 +14,26 @@ const mockFetch = vi.fn();
 global.fetch = mockFetch;
 
 // Import after setting up the mock
-const { startSession, endSession, analyze, getDevices, getSessionStatus, ApiError } = await import(
-  './backend-api.js'
-);
+const {
+  startSession,
+  endSession,
+  analyze,
+  getDevices,
+  getSessionStatus,
+  saveCredential,
+  getCredentialStatus,
+  deleteCredential,
+  setAuthTokenProvider,
+  getSessionId,
+  clearSessionId,
+  ApiError,
+} = await import('./backend-api.js');
 
 describe('API Client Module', () => {
   beforeEach(() => {
     mockFetch.mockReset();
+    setAuthTokenProvider(null);
+    clearSessionId();
   });
 
   afterEach(() => {
@@ -673,6 +686,478 @@ describe('API Client Module', () => {
       expect(error).toBeInstanceOf(ApiError);
       expect(error.code).toBe('INTERNAL_ERROR');
       expect(error.status).toBe(500);
+    });
+  });
+
+  // Task 7.2: Firebase IDトークン付与とsessionId管理
+  // Requirement 3.1: IDトークン検証
+  describe('setAuthTokenProvider', () => {
+    afterEach(() => {
+      // Reset auth token provider after each test
+      setAuthTokenProvider(null);
+    });
+
+    it('should accept a getIdToken function', () => {
+      const mockGetIdToken = vi.fn().mockResolvedValue('test-token');
+      // Should not throw
+      expect(() => setAuthTokenProvider(mockGetIdToken)).not.toThrow();
+    });
+
+    it('should accept null to clear the provider', () => {
+      expect(() => setAuthTokenProvider(null)).not.toThrow();
+    });
+  });
+
+  describe('Authorization header injection', () => {
+    afterEach(() => {
+      setAuthTokenProvider(null);
+    });
+
+    it('should add Authorization Bearer header to startSession when token is available', async () => {
+      const mockGetIdToken = vi.fn().mockResolvedValue('firebase-id-token-123');
+      setAuthTokenProvider(mockGetIdToken);
+
+      const mockResponse = {
+        sessionId: 'auth-session-1',
+        status: 'active',
+        startedAt: '2026-02-14T10:00:00.000Z',
+      };
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(mockResponse),
+      });
+
+      await startSession();
+
+      expect(mockGetIdToken).toHaveBeenCalled();
+      const [, options] = mockFetch.mock.calls[0];
+      expect(options.headers['Authorization']).toBe('Bearer firebase-id-token-123');
+    });
+
+    it('should omit Authorization header in guest mode (getIdToken returns null)', async () => {
+      const mockGetIdToken = vi.fn().mockResolvedValue(null);
+      setAuthTokenProvider(mockGetIdToken);
+
+      const mockResponse = {
+        sessionId: 'guest-session-1',
+        status: 'active',
+        startedAt: '2026-02-14T10:00:00.000Z',
+      };
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(mockResponse),
+      });
+
+      await startSession();
+
+      const [, options] = mockFetch.mock.calls[0];
+      expect(options.headers['Authorization']).toBeUndefined();
+    });
+
+    it('should omit Authorization header when no token provider is set', async () => {
+      // No setAuthTokenProvider call
+      const mockResponse = {
+        sessionId: 'no-provider-session',
+        status: 'active',
+        startedAt: '2026-02-14T10:00:00.000Z',
+      };
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(mockResponse),
+      });
+
+      await startSession();
+
+      const [, options] = mockFetch.mock.calls[0];
+      expect(options.headers['Authorization']).toBeUndefined();
+    });
+
+    it('should add Authorization header to endSession', async () => {
+      const mockGetIdToken = vi.fn().mockResolvedValue('token-for-end');
+      setAuthTokenProvider(mockGetIdToken);
+
+      const mockResponse = {
+        sessionId: 'end-session-1',
+        status: 'ended',
+        startedAt: '2026-02-14T10:00:00.000Z',
+        endedAt: '2026-02-14T11:00:00.000Z',
+      };
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(mockResponse),
+      });
+
+      await endSession();
+
+      const [, options] = mockFetch.mock.calls[0];
+      expect(options.headers['Authorization']).toBe('Bearer token-for-end');
+    });
+
+    it('should add Authorization header to analyze', async () => {
+      const mockGetIdToken = vi.fn().mockResolvedValue('token-for-analyze');
+      setAuthTokenProvider(mockGetIdToken);
+
+      const mockResponse = {
+        success: true,
+        action: { tool: 'do_nothing', params: {} },
+        result: { executed: false, message: 'No action needed' },
+        nextIntervalMs: 30000,
+      };
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(mockResponse),
+      });
+
+      await analyze('data:image/jpeg;base64,test');
+
+      const [, options] = mockFetch.mock.calls[0];
+      expect(options.headers['Authorization']).toBe('Bearer token-for-analyze');
+    });
+
+    it('should add Authorization header to getDevices', async () => {
+      const mockGetIdToken = vi.fn().mockResolvedValue('token-for-devices');
+      setAuthTokenProvider(mockGetIdToken);
+
+      const mockResponse = { devices: [] };
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(mockResponse),
+      });
+
+      await getDevices();
+
+      const [, options] = mockFetch.mock.calls[0];
+      expect(options.headers['Authorization']).toBe('Bearer token-for-devices');
+    });
+
+    it('should add Authorization header to getSessionStatus', async () => {
+      const mockGetIdToken = vi.fn().mockResolvedValue('token-for-status');
+      setAuthTokenProvider(mockGetIdToken);
+
+      const mockResponse = { hasActiveSession: false, session: null };
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(mockResponse),
+      });
+
+      await getSessionStatus();
+
+      const [, options] = mockFetch.mock.calls[0];
+      expect(options.headers['Authorization']).toBe('Bearer token-for-status');
+    });
+
+    it('should call getIdToken on every request to get a fresh token', async () => {
+      let callCount = 0;
+      const mockGetIdToken = vi.fn().mockImplementation(() => {
+        callCount++;
+        return Promise.resolve(`token-${callCount}`);
+      });
+      setAuthTokenProvider(mockGetIdToken);
+
+      // First request
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ devices: [] }),
+      });
+      await getDevices();
+
+      // Second request
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ devices: [] }),
+      });
+      await getDevices();
+
+      expect(mockGetIdToken).toHaveBeenCalledTimes(2);
+      expect(mockFetch.mock.calls[0][1].headers['Authorization']).toBe('Bearer token-1');
+      expect(mockFetch.mock.calls[1][1].headers['Authorization']).toBe('Bearer token-2');
+    });
+  });
+
+  describe('sessionId management', () => {
+    afterEach(() => {
+      setAuthTokenProvider(null);
+    });
+
+    it('should store sessionId from startSession response', async () => {
+      const mockResponse = {
+        sessionId: 'stored-session-id-abc',
+        status: 'active',
+        startedAt: '2026-02-14T10:00:00.000Z',
+      };
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(mockResponse),
+      });
+
+      await startSession();
+
+      expect(getSessionId()).toBe('stored-session-id-abc');
+    });
+
+    it('should include sessionId in analyze request body', async () => {
+      // First, start a session to store sessionId
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            sessionId: 'session-for-analyze',
+            status: 'active',
+            startedAt: '2026-02-14T10:00:00.000Z',
+          }),
+      });
+      await startSession();
+
+      // Then analyze
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            success: true,
+            action: { tool: 'do_nothing', params: {} },
+            result: { executed: false, message: 'ok' },
+            nextIntervalMs: 30000,
+          }),
+      });
+      await analyze('data:image/jpeg;base64,test');
+
+      const [, analyzeOptions] = mockFetch.mock.calls[1];
+      const body = JSON.parse(analyzeOptions.body);
+      expect(body.sessionId).toBe('session-for-analyze');
+    });
+
+    it('should include sessionId in endSession request body', async () => {
+      // First, start a session to store sessionId
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            sessionId: 'session-to-end',
+            status: 'active',
+            startedAt: '2026-02-14T10:00:00.000Z',
+          }),
+      });
+      await startSession();
+
+      // Then end session
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            sessionId: 'session-to-end',
+            status: 'ended',
+            startedAt: '2026-02-14T10:00:00.000Z',
+            endedAt: '2026-02-14T11:00:00.000Z',
+          }),
+      });
+      await endSession();
+
+      const [, endOptions] = mockFetch.mock.calls[1];
+      const body = JSON.parse(endOptions.body);
+      expect(body.sessionId).toBe('session-to-end');
+    });
+
+    it('should clear sessionId after endSession', async () => {
+      // Start session
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            sessionId: 'session-to-clear',
+            status: 'active',
+            startedAt: '2026-02-14T10:00:00.000Z',
+          }),
+      });
+      await startSession();
+      expect(getSessionId()).toBe('session-to-clear');
+
+      // End session
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            sessionId: 'session-to-clear',
+            status: 'ended',
+            startedAt: '2026-02-14T10:00:00.000Z',
+            endedAt: '2026-02-14T11:00:00.000Z',
+          }),
+      });
+      await endSession();
+
+      expect(getSessionId()).toBeNull();
+    });
+
+    it('should return null from getSessionId when no session is active', () => {
+      expect(getSessionId()).toBeNull();
+    });
+
+    it('should omit sessionId from analyze when no session has been started', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            success: true,
+            action: { tool: 'do_nothing', params: {} },
+            result: { executed: false, message: 'ok' },
+            nextIntervalMs: 30000,
+          }),
+      });
+      await analyze('data:image/jpeg;base64,test');
+
+      const [, analyzeOptions] = mockFetch.mock.calls[0];
+      const body = JSON.parse(analyzeOptions.body);
+      expect(body.sessionId).toBeUndefined();
+    });
+  });
+
+  // Task 9.1: Credential API functions
+  // Requirements: 5.1, 5.2, 5.3, 5.4, 5.5
+  describe('saveCredential', () => {
+    it('should call PUT /api/credentials/:service with token', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ ok: true }),
+      });
+
+      const result = await saveCredential('nature-remo', 'ory_at_test_token');
+
+      expect(mockFetch).toHaveBeenCalledWith('/api/credentials/nature-remo', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: 'ory_at_test_token' }),
+      });
+      expect(result.ok).toBe(true);
+    });
+
+    it('should throw ApiError on validation error (400)', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 400,
+        json: () => Promise.resolve({
+          error: { code: 'INVALID_INPUT', message: 'Token is required' },
+        }),
+      });
+
+      const error = await saveCredential('nature-remo', '').catch((e) => e);
+      expect(error).toBeInstanceOf(ApiError);
+      expect(error.code).toBe('INVALID_INPUT');
+      expect(error.status).toBe(400);
+    });
+
+    it('should throw ApiError on auth error (401)', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 401,
+        json: () => Promise.resolve({
+          error: { code: 'AUTH_REQUIRED', message: 'Authentication required' },
+        }),
+      });
+
+      const error = await saveCredential('nature-remo', 'token').catch((e) => e);
+      expect(error).toBeInstanceOf(ApiError);
+      expect(error.code).toBe('AUTH_REQUIRED');
+      expect(error.status).toBe(401);
+    });
+
+    it('should include Authorization header when token provider is set', async () => {
+      setAuthTokenProvider(vi.fn().mockResolvedValue('firebase-token'));
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ ok: true }),
+      });
+
+      await saveCredential('nature-remo', 'test-token');
+
+      const [, options] = mockFetch.mock.calls[0];
+      expect(options.headers['Authorization']).toBe('Bearer firebase-token');
+    });
+  });
+
+  describe('getCredentialStatus', () => {
+    it('should call GET /api/credentials/status', async () => {
+      const mockResponse = {
+        credentials: [
+          { service: 'nature-remo', configured: true, updatedAt: '2026-02-14T10:00:00Z' },
+        ],
+      };
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(mockResponse),
+      });
+
+      const result = await getCredentialStatus();
+
+      expect(mockFetch).toHaveBeenCalledWith('/api/credentials/status', {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      expect(result.credentials).toHaveLength(1);
+      expect(result.credentials[0].service).toBe('nature-remo');
+      expect(result.credentials[0].configured).toBe(true);
+    });
+
+    it('should return empty credentials array when none configured', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ credentials: [] }),
+      });
+
+      const result = await getCredentialStatus();
+      expect(result.credentials).toEqual([]);
+    });
+
+    it('should throw ApiError on auth error (401)', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 401,
+        json: () => Promise.resolve({
+          error: { code: 'AUTH_REQUIRED', message: 'Authentication required' },
+        }),
+      });
+
+      const error = await getCredentialStatus().catch((e) => e);
+      expect(error).toBeInstanceOf(ApiError);
+      expect(error.code).toBe('AUTH_REQUIRED');
+    });
+  });
+
+  describe('deleteCredential', () => {
+    it('should call DELETE /api/credentials/:service', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ ok: true }),
+      });
+
+      const result = await deleteCredential('nature-remo');
+
+      expect(mockFetch).toHaveBeenCalledWith('/api/credentials/nature-remo', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      expect(result.ok).toBe(true);
+    });
+
+    it('should throw ApiError on server error (500)', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        json: () => Promise.resolve({
+          error: { code: 'INTERNAL_ERROR', message: 'Server error' },
+        }),
+      });
+
+      const error = await deleteCredential('nature-remo').catch((e) => e);
+      expect(error).toBeInstanceOf(ApiError);
+      expect(error.code).toBe('INTERNAL_ERROR');
+      expect(error.status).toBe(500);
+    });
+
+    it('should throw ApiError on network failure', async () => {
+      mockFetch.mockRejectedValue(new Error('Network error'));
+
+      const error = await deleteCredential('nature-remo').catch((e) => e);
+      expect(error).toBeInstanceOf(ApiError);
+      expect(error.code).toBe('NETWORK_ERROR');
     });
   });
 });

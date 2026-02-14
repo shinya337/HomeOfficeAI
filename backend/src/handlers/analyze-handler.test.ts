@@ -71,7 +71,7 @@ describe('Analyze Handler', () => {
     describe('Request validation', () => {
       it('should return 400 when request body is missing', async () => {
         // Start a session first
-        sessionManager.startSession();
+        sessionManager.startSession(null);
 
         const response = await request(app)
           .post('/api/analyze')
@@ -83,7 +83,7 @@ describe('Analyze Handler', () => {
       });
 
       it('should return 400 when image field is missing', async () => {
-        sessionManager.startSession();
+        sessionManager.startSession(null);
 
         const response = await request(app)
           .post('/api/analyze')
@@ -95,7 +95,7 @@ describe('Analyze Handler', () => {
       });
 
       it('should return 400 when image.base64 is missing', async () => {
-        sessionManager.startSession();
+        sessionManager.startSession(null);
 
         const response = await request(app)
           .post('/api/analyze')
@@ -107,7 +107,7 @@ describe('Analyze Handler', () => {
       });
 
       it('should return 400 when image.mimeType is missing', async () => {
-        sessionManager.startSession();
+        sessionManager.startSession(null);
 
         const response = await request(app)
           .post('/api/analyze')
@@ -119,7 +119,7 @@ describe('Analyze Handler', () => {
       });
 
       it('should return 400 when image.base64 is empty', async () => {
-        sessionManager.startSession();
+        sessionManager.startSession(null);
 
         const response = await request(app)
           .post('/api/analyze')
@@ -143,8 +143,8 @@ describe('Analyze Handler', () => {
       });
 
       it('should return 400 when session has ended', async () => {
-        sessionManager.startSession();
-        sessionManager.endSession();
+        const session = sessionManager.startSession(null);
+        sessionManager.endSession(session.sessionId);
 
         const response = await request(app)
           .post('/api/analyze')
@@ -157,7 +157,7 @@ describe('Analyze Handler', () => {
 
     describe('Successful analysis (Req 3.1, 3.3)', () => {
       it('should return 200 with analysis result on success', async () => {
-        sessionManager.startSession();
+        sessionManager.startSession(null);
 
         const response = await request(app)
           .post('/api/analyze')
@@ -177,7 +177,7 @@ describe('Analyze Handler', () => {
       });
 
       it('should return Content-Type: application/json', async () => {
-        sessionManager.startSession();
+        sessionManager.startSession(null);
 
         const response = await request(app)
           .post('/api/analyze')
@@ -188,7 +188,7 @@ describe('Analyze Handler', () => {
       });
 
       it('should include deviceState in response when available', async () => {
-        sessionManager.startSession();
+        sessionManager.startSession(null);
 
         const handlerWithState = createMockAnalyzeHandler({
           analyze: vi.fn().mockResolvedValue({
@@ -230,7 +230,7 @@ describe('Analyze Handler', () => {
 
     describe('Interval calculation (Req 4.3, 4.4)', () => {
       it('should return DEFAULT interval for normal interval', async () => {
-        sessionManager.startSession();
+        sessionManager.startSession(null);
 
         const handlerNormal = createMockAnalyzeHandler({
           analyze: vi.fn().mockResolvedValue({
@@ -261,7 +261,7 @@ describe('Analyze Handler', () => {
       });
 
       it('should return 5 seconds (5000ms) for continue_monitoring', async () => {
-        sessionManager.startSession();
+        sessionManager.startSession(null);
 
         const handlerShort = createMockAnalyzeHandler({
           analyze: vi.fn().mockResolvedValue({
@@ -294,7 +294,7 @@ describe('Analyze Handler', () => {
 
     describe('AI API error handling (Req 3.4)', () => {
       it('should return fallback do_nothing on AI error', async () => {
-        sessionManager.startSession();
+        sessionManager.startSession(null);
 
         const handlerAIError = createMockAnalyzeHandler({
           analyze: vi.fn().mockResolvedValue({
@@ -327,7 +327,7 @@ describe('Analyze Handler', () => {
       });
 
       it('should include error information in response on AI error', async () => {
-        sessionManager.startSession();
+        sessionManager.startSession(null);
 
         const handlerAIError = createMockAnalyzeHandler({
           analyze: vi.fn().mockResolvedValue({
@@ -360,7 +360,7 @@ describe('Analyze Handler', () => {
 
     describe('IoT error handling', () => {
       it('should return fallback do_nothing on IoT error', async () => {
-        sessionManager.startSession();
+        sessionManager.startSession(null);
 
         const handlerIoTError = createMockAnalyzeHandler({
           analyze: vi.fn().mockResolvedValue({
@@ -392,7 +392,7 @@ describe('Analyze Handler', () => {
 
     describe('Error response format', () => {
       it('should return JSON for 400 validation errors', async () => {
-        sessionManager.startSession();
+        sessionManager.startSession(null);
 
         const response = await request(app)
           .post('/api/analyze')
@@ -404,7 +404,7 @@ describe('Analyze Handler', () => {
       });
 
       it('should return 500 with JSON error for internal errors', async () => {
-        sessionManager.startSession();
+        sessionManager.startSession(null);
 
         const handlerInternalError = createMockAnalyzeHandler({
           analyze: vi.fn().mockRejectedValue(new Error('Unexpected error')),
@@ -426,6 +426,48 @@ describe('Analyze Handler', () => {
         expect(response.body).toHaveProperty('error');
         expect(response.body.error).toHaveProperty('code');
         expect(response.body.error).toHaveProperty('message');
+      });
+    });
+
+    describe('Session-specific analysis with sessionId (Task 6.3)', () => {
+      it('should accept sessionId in request body alongside image', async () => {
+        const session = sessionManager.startSession(null);
+
+        const response = await request(app)
+          .post('/api/analyze')
+          .send({
+            image: { base64: 'dGVzdA==', mimeType: 'image/jpeg' },
+            sessionId: session.sessionId,
+          })
+          .expect(200);
+
+        expect(response.body.success).toBe(true);
+      });
+
+      it('should return 400 when sessionId is provided but session not found', async () => {
+        // Start a session first so hasActiveSession() returns true
+        sessionManager.startSession(null);
+
+        const response = await request(app)
+          .post('/api/analyze')
+          .send({
+            image: { base64: 'dGVzdA==', mimeType: 'image/jpeg' },
+            sessionId: 'non-existent-session-id',
+          })
+          .expect(400);
+
+        expect(response.body.error.code).toBe(ErrorCodes.NO_ACTIVE_SESSION);
+      });
+
+      it('should work without sessionId for backward compatibility', async () => {
+        sessionManager.startSession(null);
+
+        const response = await request(app)
+          .post('/api/analyze')
+          .send({ image: { base64: 'dGVzdA==', mimeType: 'image/jpeg' } })
+          .expect(200);
+
+        expect(response.body.success).toBe(true);
       });
     });
   });

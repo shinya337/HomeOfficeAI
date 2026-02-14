@@ -19,6 +19,9 @@ import {
   extractUserStateFromResult,
   extractReasonFromResult,
 } from './app-mode-integration.js';
+import { initAuth, _getAuthInstance } from './app-auth-integration.js';
+import { createCredentialSettings } from './credential-settings.js';
+import { saveCredential, getCredentialStatus, deleteCredential } from './backend-api.js';
 
 // 6つの背景テーマ
 const THEMES = [
@@ -33,6 +36,9 @@ const THEMES = [
 // デバイスリスト
 let deviceListElement = null;
 let selectedDevices = [];
+
+// Credential Settings
+let credentialSettings = null;
 
 // SessionController
 let sessionController = null;
@@ -120,6 +126,20 @@ function init() {
 
   // モード表示UIを初期化
   initModeDisplay();
+
+  // Firebase Auth 認証モジュールを初期化（ログインUI、認証状態管理、トークンプロバイダー設定）
+  const officeSpace = document.getElementById('officeSpace');
+  if (officeSpace) {
+    const authInst = initAuth(officeSpace);
+    // 認証状態変化時にデバイス一覧を更新（ログイン/ログアウトでトークンが変わるため）
+    if (authInst) {
+      authInst.onAuthStateChange((authState) => {
+        if (!authState.isLoading && deviceListElement) {
+          fetchAndDisplayDevices(deviceListElement);
+        }
+      });
+    }
+  }
 
   // 初期ログ
   addLog('system', 'HomeOffice.ai 起動');
@@ -403,6 +423,29 @@ async function openSettings() {
   // セッション中はデバイス選択を無効化
   if (state.isWorking) {
     setDeviceListEnabled(deviceListElement, false);
+  }
+
+  // クレデンシャル設定UIを初期化（初回のみ）
+  if (!credentialSettings) {
+    const authInstance = _getAuthInstance();
+    if (authInstance) {
+      const credentialContainer = document.getElementById('credentialSettingsContainer');
+      if (credentialContainer) {
+        credentialSettings = createCredentialSettings({
+          auth: authInstance,
+          backendApi: { saveCredential, getCredentialStatus, deleteCredential },
+          onCredentialChange: () => {
+            if (deviceListElement) fetchAndDisplayDevices(deviceListElement);
+          },
+        });
+        credentialSettings.mount(credentialContainer);
+      }
+    }
+  }
+
+  // クレデンシャルステータスを更新
+  if (credentialSettings) {
+    credentialSettings.refresh();
   }
 }
 
