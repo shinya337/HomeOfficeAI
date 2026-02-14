@@ -804,7 +804,10 @@ export function createApp(options?: CreateAppOptions): Express {
               return;
             }
 
-            // No Nature Remo token, no Alexa devices -> fall through to global
+            // No Nature Remo token, no Alexa devices -> return empty for authenticated users
+            // (global fallback is only for guests)
+            res.json({ devices: [] });
+            return;
           }
 
           // Fall back to global applianceService (guest mode or user without token)

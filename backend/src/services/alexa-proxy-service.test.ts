@@ -318,17 +318,20 @@ describe('alexa-proxy-service', () => {
   // Requirements: 5.1, 5.5
   // ===========================================================================
 
-  describe('duplicate session prevention', () => {
-    it('should return SESSION_ALREADY_ACTIVE when same user starts second session', async () => {
+  describe('duplicate session auto-cleanup', () => {
+    it('should auto-cleanup existing active session and start a new one', async () => {
       const result1 = await service.startProxySession('user-123');
       expect(result1.ok).toBe(true);
 
       const result2 = await service.startProxySession('user-123');
 
-      expect(result2.ok).toBe(false);
-      if (!result2.ok) {
-        expect(result2.error.code).toBe('SESSION_ALREADY_ACTIVE');
-        expect(result2.error.message).toContain('user-123');
+      expect(result2.ok).toBe(true);
+      if (result1.ok && result2.ok) {
+        // New session should have a different sessionId
+        expect(result2.value.sessionId).not.toBe(result1.value.sessionId);
+        // Old session should be cleaned up (no longer active)
+        const oldSession = service.getProxySession(result1.value.sessionId);
+        expect(oldSession?.status).not.toBe('active');
       }
     });
 
@@ -1001,17 +1004,19 @@ describe('alexa-proxy-service', () => {
     });
   });
 
-  describe('duplicate session error details', () => {
-    it('should include existing sessionId in SESSION_ALREADY_ACTIVE error message', async () => {
+  describe('duplicate session auto-cleanup details', () => {
+    it('should cleanup old session resources when starting a new session for same user', async () => {
       const result1 = await service.startProxySession('user-123');
       expect(result1.ok).toBe(true);
       if (!result1.ok) return;
 
       const result2 = await service.startProxySession('user-123');
-      expect(result2.ok).toBe(false);
-      if (!result2.ok) {
-        expect(result2.error.message).toContain(result1.value.sessionId);
-      }
+      expect(result2.ok).toBe(true);
+      if (!result2.ok) return;
+
+      // Old session should no longer be retrievable as active
+      const oldSession = service.getProxySession(result1.value.sessionId);
+      expect(oldSession === undefined || oldSession.status !== 'active').toBe(true);
     });
   });
 });

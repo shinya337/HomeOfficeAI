@@ -333,6 +333,8 @@ body {
 
 .settings-content {
   padding: 16px 24px 24px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .settings-section {
@@ -340,19 +342,18 @@ body {
 }
 
 .settings-section-title {
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  margin-bottom: 12px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: #9ca3af;
+  letter-spacing: 0.02em;
+  margin-bottom: 4px;
 }
 
 .settings-item {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 0;
+  padding: 16px 0;
   border-bottom: 1px solid var(--border);
 }
 
@@ -363,16 +364,30 @@ body {
 .settings-item-info {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 14px;
 }
 
 .settings-item-icon {
-  font-size: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  color: #9ca3af;
+  flex-shrink: 0;
+}
+
+.settings-item-icon svg {
+  width: 24px;
+  height: 24px;
+  stroke-width: 1.4;
 }
 
 .settings-item-label {
-  font-size: 0.95rem;
-  font-weight: 500;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: -0.01em;
 }
 
 .settings-item-description {
@@ -420,12 +435,12 @@ body {
 
 /* ===== デバイス一覧 ===== */
 .device-list {
-  margin-top: 8px;
+  margin-top: 0;
 }
 
 .device-list-loading {
   text-align: center;
-  color: var(--text-muted);
+  color: #9ca3af;
   font-size: 0.9rem;
   padding: 16px 0;
 }
@@ -433,41 +448,38 @@ body {
 .device-list-items {
   display: flex;
   flex-direction: column;
-  gap: 8px;
 }
 
-/* --- デバイスカード --- */
+/* --- デバイスアイテム --- */
 .device-item {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
-  padding: 12px 14px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  transition: all 0.2s;
+  gap: 14px;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--border);
 }
 
-.device-item:has(.device-item-checkbox:checked) {
-  background: #f0f7ff;
-  border-color: #b3d4fc;
+.device-item:last-child {
+  border-bottom: none;
 }
 
-/* カスタムトグルスイッチ */
+/* iOS風トグル（デバイス用） */
 .device-item-checkbox {
   -webkit-appearance: none;
   appearance: none;
-  width: 40px;
-  height: 22px;
-  background: #ccc;
-  border-radius: 11px;
+  width: 52px;
+  height: 32px;
+  background: #e5e5ea;
+  border-radius: 32px;
   position: relative;
   cursor: pointer;
-  transition: background 0.25s;
+  transition: background 0.25s ease;
   flex-shrink: 0;
   border: none;
   outline: none;
+  order: 1;
+  margin-left: auto;
 }
 
 .device-item-checkbox::after {
@@ -475,20 +487,20 @@ body {
   position: absolute;
   top: 2px;
   left: 2px;
-  width: 18px;
-  height: 18px;
+  width: 28px;
+  height: 28px;
   background: white;
   border-radius: 50%;
-  transition: transform 0.25s;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+  transition: transform 0.25s ease;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2), 0 0 0 0.5px rgba(0, 0, 0, 0.04);
 }
 
 .device-item-checkbox:checked {
-  background: #3b82f6;
+  background: #34c759;
 }
 
 .device-item-checkbox:checked::after {
-  transform: translateX(18px);
+  transform: translateX(20px);
 }
 
 .device-item-checkbox:disabled {
@@ -498,16 +510,13 @@ body {
 
 /* デバイスアイコン */
 .device-item-icon {
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 1.25rem;
-  background: white;
-  border-radius: 8px;
+  color: #9ca3af;
   flex-shrink: 0;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
 }
 
 .device-item-label {
@@ -519,15 +528,15 @@ body {
 }
 
 .device-item-name {
-  font-size: 0.95rem;
+  font-size: 1rem;
   font-weight: 600;
   color: var(--text);
 }
 
 .device-item-type {
-  font-size: 0.75rem;
-  color: var(--text-muted);
-  letter-spacing: 0.02em;
+  font-size: 0.8rem;
+  color: #9ca3af;
+  margin-top: 3px;
 }
 
 .device-list-error-container {
@@ -568,7 +577,7 @@ body {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  padding: 4px 0 0 52px;
+  padding: 8px 0 0 42px;
 }
 
 .device-sub-action-item {
@@ -1060,12 +1069,16 @@ body {
 .modal-card.settings-card {
   padding: 0;
   text-align: left;
+  max-height: calc(100vh - 40px);
+  display: flex;
+  flex-direction: column;
 }
 
 .settings-item-desc {
   font-size: 0.8rem;
-  color: var(--text-muted);
-  margin-top: 2px;
+  color: #9ca3af;
+  margin-top: 3px;
+  line-height: 1.3;
 }
 
 .settings-item-action {
@@ -1120,7 +1133,8 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 14px;
+  height: 40px;
+  padding: 0 14px;
   background: rgba(255, 255, 255, 0.2);
   backdrop-filter: blur(8px);
   border: 1px solid rgba(255, 255, 255, 0.3);
@@ -1160,19 +1174,32 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
+  height: 40px;
+  padding: 0 12px 0 4px;
+  background: rgba(255, 255, 255, 0.2);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.auth-user-info:hover {
+  background: rgba(255, 255, 255, 0.3);
+  border-color: white;
 }
 
 .auth-user-avatar-container {
-  width: 32px;
-  height: 32px;
+  width: 30px;
+  height: 30px;
   flex-shrink: 0;
 }
 
 .auth-user-avatar {
-  width: 32px;
-  height: 32px;
+  width: 30px;
+  height: 30px;
   border-radius: 50%;
-  border: 2px solid rgba(255, 255, 255, 0.6);
+  border: none;
   object-fit: cover;
 }
 
@@ -1182,15 +1209,15 @@ body {
   justify-content: center;
   background: rgba(255, 255, 255, 0.25);
   color: white;
-  font-size: 0.85rem;
+  font-size: 0.8rem;
   font-weight: 600;
+  border-radius: 50%;
 }
 
 .auth-user-name {
   color: white;
   font-size: 0.85rem;
   font-weight: 500;
-  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
   max-width: 120px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1256,6 +1283,18 @@ body {
   margin-top: 4px;
 }
 
+.credential-service-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.credential-service-item:last-child {
+  border-bottom: none;
+}
+
 .credential-login-prompt {
   padding: 12px 0;
 }
@@ -1270,12 +1309,6 @@ body {
   padding: 4px 0;
 }
 
-.credential-service-item {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
 .credential-service-header {
   display: flex;
   align-items: center;
@@ -1283,33 +1316,71 @@ body {
   gap: 8px;
 }
 
+.credential-header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .credential-service-label {
-  font-size: 0.9rem;
-  font-weight: 500;
+  font-size: 1rem;
+  font-weight: 600;
   color: var(--text);
 }
 
 .credential-configured-status {
   font-size: 0.8rem;
-  color: var(--text-muted);
+  color: #9ca3af;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.credential-configured-status::before {
+  content: '';
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #d1d5db;
+}
+
+.credential-configured-status.configured::before {
+  background: #34c759;
+}
+
+.credential-configured-status.unconfigured::before {
+  background: #f59e0b;
 }
 
 .credential-input-row {
   display: flex;
-  gap: 6px;
-  align-items: center;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.credential-help-link {
+  font-size: 0.8rem;
+  color: #3b82f6;
+  text-decoration: none;
+  text-align: right;
+}
+
+.credential-help-link:hover {
+  text-decoration: underline;
 }
 
 .credential-token-input {
-  flex: 1;
-  padding: 8px 12px;
+  width: 100%;
+  padding: 10px 12px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 8px;
   font-size: 0.85rem;
-  background: white;
+  background: var(--glass-bg, rgba(255,255,255,0.06));
   color: var(--text);
   outline: none;
   transition: border-color 0.2s;
+  box-sizing: border-box;
 }
 
 .credential-token-input:focus {
@@ -1317,31 +1388,45 @@ body {
 }
 
 .credential-token-input::placeholder {
-  color: #999;
+  color: #9ca3af;
 }
 
 .credential-save-button,
-.credential-delete-button {
-  padding: 8px 14px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
+.credential-delete-button,
+.alexa-auth-start-button {
+  padding: 9px 16px;
+  border: none;
+  border-radius: 8px;
   font-size: 0.85rem;
+  font-weight: 500;
   cursor: pointer;
   transition: all 0.2s;
-  background: transparent;
-  color: var(--text);
   white-space: nowrap;
 }
 
-.credential-save-button:hover {
-  background: var(--button-bg);
-  color: var(--button-text);
-  border-color: var(--button-bg);
+.credential-save-button,
+.alexa-auth-start-button {
+  background: #3b82f6;
+  color: white;
+  width: 100%;
+}
+
+.credential-save-button:hover,
+.alexa-auth-start-button:hover {
+  background: #2563eb;
+}
+
+.alexa-auth-start-button:disabled {
+  background: #9ca3af;
+  cursor: not-allowed;
 }
 
 .credential-delete-button {
+  padding: 5px 12px;
+  font-size: 0.8rem;
+  background: transparent;
   color: #d32f2f;
-  border-color: #e0c0c0;
+  border: 1px solid #e0c0c0;
 }
 
 .credential-delete-button:hover {
@@ -1369,6 +1454,90 @@ body {
 .credential-feedback-error {
   background: #fde8e8;
   color: #c62828;
+}
+
+/* iOS風トグルスイッチ */
+.ios-toggle {
+  position: relative;
+  display: inline-block;
+  width: 52px;
+  height: 32px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.ios-toggle input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.ios-toggle-slider {
+  position: absolute;
+  inset: 0;
+  background: #e5e5ea;
+  border-radius: 32px;
+  transition: background 0.25s ease;
+}
+
+.ios-toggle-slider::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 28px;
+  height: 28px;
+  background: white;
+  border-radius: 50%;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2), 0 0 0 0.5px rgba(0, 0, 0, 0.04);
+  transition: transform 0.25s ease;
+}
+
+.ios-toggle input:checked + .ios-toggle-slider {
+  background: #34c759;
+}
+
+.ios-toggle input:checked + .ios-toggle-slider::after {
+  transform: translateX(20px);
+}
+
+/* ゲスト向けログイン誘導 */
+.settings-guest-hint {
+  display: none;
+  padding: 14px 16px;
+  margin-top: 4px;
+  background: #f0f7ff;
+  border: 1px solid #b3d4fc;
+  border-radius: 8px;
+}
+
+.settings-guest-hint-text {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.settings-guest-login-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  margin-top: 12px;
+  padding: 10px 16px;
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--text);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.settings-guest-login-button:hover {
+  background: var(--bg);
+  border-color: #999;
 }
 
 /* レスポンシブ */

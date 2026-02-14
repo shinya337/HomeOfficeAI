@@ -290,9 +290,9 @@ export function createAuthUI(auth) {
         nameEl.textContent = state.user.displayName || '';
       }
     } else {
-      // Guest: show login button and guest badge
+      // Guest: show login button only
       if (loginButton) loginButton.classList.remove('hidden');
-      if (guestBadge) guestBadge.classList.remove('hidden');
+      if (guestBadge) guestBadge.classList.add('hidden');
       if (userInfo) userInfo.classList.add('hidden');
 
       // Clear authenticated user DOM content to ensure clean guest state.

@@ -211,6 +211,7 @@ function buildProxyOptions(
 
   return {
     ...baseOptions,
+    amazonPageProxyLanguage: 'ja_JP',
     proxyOnly: true,
     proxyOwnIp: ip,
     proxyPort: port,
@@ -651,6 +652,7 @@ export async function createAlexaRemoteForProxy(
   const initOptions: Record<string, unknown> = {
     amazonPage: config.amazonPage,
     acceptLanguage: config.acceptLanguage,
+    amazonPageProxyLanguage: 'ja_JP',
     usePushConnection: false,
     proxyOnly: true,
     proxyOwnIp: config.proxyOwnIp ?? 'localhost',

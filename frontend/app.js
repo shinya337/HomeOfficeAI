@@ -59,7 +59,7 @@ const state = {
   logs: [],
   permissions: {
     camera: localStorage.getItem('permission_camera') === 'true',
-    appliance: localStorage.getItem('permission_appliance') === 'true'
+    voice: localStorage.getItem('permission_voice') === 'true',
   },
   /** Alexaの音声再生が有効なセッションかどうか */
   alexaSpeechEnabled: false,
@@ -80,12 +80,8 @@ const elements = {
   settingsButton: document.getElementById('settingsButton'),
   settingsModal: document.getElementById('settingsModal'),
   settingsClose: document.getElementById('settingsClose'),
-  cameraStatusBadge: document.getElementById('cameraStatusBadge'),
   cameraToggle: document.getElementById('cameraToggle'),
-  applianceStatusBadge: document.getElementById('applianceStatusBadge'),
-  applianceToggle: document.getElementById('applianceToggle'),
-  avatarUpload: document.getElementById('avatarUpload'),
-  avatarUploadButton: document.getElementById('avatarUploadButton'),
+  voiceToggle: document.getElementById('voiceToggle'),
   deviceListContainer: document.getElementById('deviceListContainer'),
   permissionModal: document.getElementById('permissionModal'),
   permissionIcon: document.getElementById('permissionIcon'),
@@ -102,9 +98,6 @@ function init() {
   // 背景を設定
   loadBackground();
 
-  // アバター画像を読み込み
-  loadSavedAvatar();
-
   // イベントリスナー
   elements.avatarButton.addEventListener('click', handleAvatarClick);
   elements.miniExpand.addEventListener('click', expandFromMini);
@@ -113,13 +106,18 @@ function init() {
   elements.settingsModal.addEventListener('click', (e) => {
     if (e.target === elements.settingsModal) closeSettings();
   });
-  elements.cameraToggle.addEventListener('click', () => togglePermission('camera'));
-  elements.applianceToggle.addEventListener('click', () => togglePermission('appliance'));
-  elements.avatarUploadButton.addEventListener('click', () => elements.avatarUpload.click());
-  elements.avatarUpload.addEventListener('change', handleAvatarUpload);
+  elements.cameraToggle.addEventListener('change', () => togglePermission('camera'));
+  elements.voiceToggle.addEventListener('change', () => togglePermission('voice'));
   elements.permissionAllow.addEventListener('click', handlePermissionAllow);
   elements.permissionSkip.addEventListener('click', handlePermissionSkip);
   document.addEventListener('visibilitychange', handleVisibilityChange);
+  const guestLoginButton = document.getElementById('guestLoginButton');
+  if (guestLoginButton) {
+    guestLoginButton.addEventListener('click', () => {
+      const auth = _getAuthInstance();
+      if (auth) auth.signIn().catch((e) => console.error('[Settings] Sign-in failed:', e));
+    });
+  }
 
   // 設定UIを更新
   updateSettingsUI();
@@ -134,8 +132,13 @@ function init() {
     // 認証状態変化時にデバイス一覧を更新（ログイン/ログアウトでトークンが変わるため）
     if (authInst) {
       authInst.onAuthStateChange((authState) => {
-        if (!authState.isLoading && deviceListElement) {
-          fetchAndDisplayDevices(deviceListElement);
+        if (!authState.isLoading) {
+          const isAuthenticated = !!authState.user;
+          updateSettingsVisibilityForAuth(isAuthenticated);
+          updateAvatarFromAuth(authState.user);
+          if (deviceListElement) {
+            fetchAndDisplayDevices(deviceListElement);
+          }
         }
       });
     }
@@ -159,15 +162,24 @@ function loadBackground() {
   console.log('[HomeOffice.ai] Background:', theme);
 }
 
-// アバター画像を読み込み
-function loadSavedAvatar() {
-  const savedAvatar = localStorage.getItem('user_avatar');
-  if (savedAvatar) {
+/**
+ * 認証ユーザーのプロフィール画像を中央アバターに反映する
+ * @param {object|null} user - Firebase Auth ユーザーオブジェクト
+ */
+function updateAvatarFromAuth(user) {
+  if (user && user.photoURL) {
     const img = document.createElement('img');
-    img.src = savedAvatar;
-    img.alt = 'Your Avatar';
+    img.src = user.photoURL;
+    img.alt = user.displayName || 'User';
     elements.avatarImage.innerHTML = '';
     elements.avatarImage.appendChild(img);
+  } else {
+    // ゲスト時はデフォルトSVGに戻す
+    elements.avatarImage.innerHTML = `
+      <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="50" cy="35" r="25" fill="#6b7280"/>
+        <ellipse cx="50" cy="85" rx="35" ry="25" fill="#6b7280"/>
+      </svg>`;
   }
 }
 
@@ -182,9 +194,8 @@ function handleAvatarClick() {
 
 // 作業開始
 function startWork() {
-  // 初回は許可を確認
-  const hasAskedCamera = localStorage.getItem('asked_camera');
-  if (!hasAskedCamera) {
+  // カメラが許可されていない場合は許可モーダルを表示
+  if (!state.permissions.camera) {
     showPermissionModal('camera');
     return;
   }
@@ -194,6 +205,29 @@ function startWork() {
 
 // セッション開始
 async function beginSession() {
+  // カメラアクセスを最初に確認（失敗したらセッションを開始しない）
+  const videoElement = document.getElementById('cameraVideo');
+  let stream;
+  try {
+    console.log('[HomeOffice.ai] カメラアクセス要求中...');
+    stream = await navigator.mediaDevices.getUserMedia({ video: true });
+    videoElement.srcObject = stream;
+    await videoElement.play();
+    console.log('[HomeOffice.ai] カメラ取得成功');
+  } catch (error) {
+    console.error('[HomeOffice.ai] カメラアクセス失敗:', error);
+    // パーミッション状態をリセット
+    state.permissions.camera = false;
+    localStorage.setItem('permission_camera', 'false');
+    updateSettingsUI();
+    if (error.name === 'NotAllowedError') {
+      addLog('system', 'ブラウザでカメラがブロックされています。\nアドレスバーのカメラアイコンから許可してください。');
+    } else {
+      addLog('system', 'カメラにアクセスできませんでした');
+    }
+    return;
+  }
+
   state.isWorking = true;
   state.startTime = Date.now();
 
@@ -238,7 +272,6 @@ async function beginSession() {
 
   // SessionControllerで監視ループを開始
   if (sessionId) {
-    const videoElement = document.getElementById('cameraVideo');
     sessionController = createSessionController(videoElement, {
       onSessionStarted: () => {
         console.log('[HomeOffice.ai] 監視ループ開始');
@@ -259,18 +292,8 @@ async function beginSession() {
       },
     });
 
-    try {
-      // カメラアクセスを取得
-      console.log('[HomeOffice.ai] カメラアクセス要求中...');
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-      videoElement.srcObject = stream;
-      await videoElement.play();
-      console.log('[HomeOffice.ai] カメラ取得成功、監視ループ開始');
-      // セッションAPIは既に叩いたので、resumeでループだけ開始
-      await sessionController.resumeExistingSession(sessionId);
-    } catch (error) {
-      console.error('[HomeOffice.ai] カメラ/監視ループ開始失敗:', error);
-    }
+    // セッションAPIは既に叩いたので、resumeでループだけ開始
+    await sessionController.resumeExistingSession(sessionId);
   }
 
   addLog('start', '作業開始');
@@ -455,17 +478,28 @@ function closeSettings() {
 }
 
 function updateSettingsUI() {
-  // カメラ
-  elements.cameraStatusBadge.textContent = state.permissions.camera ? 'ON' : 'OFF';
-  elements.cameraStatusBadge.classList.toggle('on', state.permissions.camera);
-  elements.cameraStatusBadge.classList.toggle('off', !state.permissions.camera);
-  elements.cameraToggle.textContent = state.permissions.camera ? 'オフにする' : 'オンにする';
+  elements.cameraToggle.checked = state.permissions.camera;
+  elements.voiceToggle.checked = state.permissions.voice;
+}
 
-  // 家電
-  elements.applianceStatusBadge.textContent = state.permissions.appliance ? 'ON' : 'OFF';
-  elements.applianceStatusBadge.classList.toggle('on', state.permissions.appliance);
-  elements.applianceStatusBadge.classList.toggle('off', !state.permissions.appliance);
-  elements.applianceToggle.textContent = state.permissions.appliance ? 'オフにする' : 'オンにする';
+/**
+ * 認証状態に応じて家電関連の設定項目の表示/非表示を切り替える
+ * @param {boolean} isAuthenticated - ログイン済みかどうか
+ */
+function updateSettingsVisibilityForAuth(isAuthenticated) {
+  const display = isAuthenticated ? '' : 'none';
+  const deviceListSection = document.getElementById('deviceListSection');
+  if (deviceListSection) {
+    deviceListSection.style.display = display;
+  }
+  const credentialContainer = document.getElementById('credentialSettingsContainer');
+  if (credentialContainer) {
+    credentialContainer.style.display = display;
+  }
+  const guestHint = document.getElementById('guestLoginHint');
+  if (guestHint) {
+    guestHint.style.display = isAuthenticated ? 'none' : 'block';
+  }
 }
 
 function togglePermission(type) {
@@ -473,10 +507,10 @@ function togglePermission(type) {
     state.permissions.camera = !state.permissions.camera;
     localStorage.setItem('permission_camera', state.permissions.camera);
     addLog('system', `カメラ ${state.permissions.camera ? 'ON' : 'OFF'}`);
-  } else if (type === 'appliance') {
-    state.permissions.appliance = !state.permissions.appliance;
-    localStorage.setItem('permission_appliance', state.permissions.appliance);
-    addLog('system', `家電制御 ${state.permissions.appliance ? 'ON' : 'OFF'}`);
+  } else if (type === 'voice') {
+    state.permissions.voice = !state.permissions.voice;
+    localStorage.setItem('permission_voice', state.permissions.voice);
+    addLog('system', `音声通知 ${state.permissions.voice ? 'ON' : 'OFF'}`);
   }
   updateSettingsUI();
 }
@@ -488,11 +522,7 @@ function showPermissionModal(type) {
   if (type === 'camera') {
     elements.permissionIcon.textContent = '📷';
     elements.permissionTitle.textContent = 'カメラへのアクセス';
-    elements.permissionDescription.textContent = 'AIが集中状態を自動で検知するためにカメラを使用します。映像はデバイス内で処理され、サーバーには送信されません。';
-  } else if (type === 'appliance') {
-    elements.permissionIcon.textContent = '💡';
-    elements.permissionTitle.textContent = '家電の制御';
-    elements.permissionDescription.textContent = '照明やエアコンを自動で制御します。Nature Remoと連携します。';
+    elements.permissionDescription.innerHTML = 'AIがあなたの状態を自動で検知するために<br>カメラを使用します。<br><br>画像はGoogle Vertex AIで安全に分析され、<br>保存や学習には使用されません。<br><br>設定からいつでもOFFにできます。';
   }
 
   elements.permissionModal.dataset.type = type;
@@ -508,17 +538,6 @@ function handlePermissionAllow() {
     state.permissions.camera = true;
     localStorage.setItem('permission_camera', 'true');
     addLog('system', 'カメラ ON');
-
-    // 次に家電を聞く
-    const hasAskedAppliance = localStorage.getItem('asked_appliance');
-    if (!hasAskedAppliance) {
-      showPermissionModal('appliance');
-      return;
-    }
-  } else if (type === 'appliance') {
-    state.permissions.appliance = true;
-    localStorage.setItem('permission_appliance', 'true');
-    addLog('system', '家電制御 ON');
   }
 
   updateSettingsUI();
@@ -526,40 +545,10 @@ function handlePermissionAllow() {
 }
 
 function handlePermissionSkip() {
-  const type = elements.permissionModal.dataset.type;
   elements.permissionModal.classList.add('hidden');
-  localStorage.setItem(`asked_${type}`, 'true');
-
-  if (type === 'camera') {
-    const hasAskedAppliance = localStorage.getItem('asked_appliance');
-    if (!hasAskedAppliance) {
-      showPermissionModal('appliance');
-      return;
-    }
-  }
-
-  beginSession();
-}
-
-// アバターアップロード
-function handleAvatarUpload(event) {
-  const file = event.target.files[0];
-  if (!file) return;
-
-  const reader = new FileReader();
-  reader.onload = (e) => {
-    const dataUrl = e.target.result;
-    localStorage.setItem('user_avatar', dataUrl);
-
-    const img = document.createElement('img');
-    img.src = dataUrl;
-    img.alt = 'Your Avatar';
-    elements.avatarImage.innerHTML = '';
-    elements.avatarImage.appendChild(img);
-
-    addLog('avatar', 'アバター更新');
-  };
-  reader.readAsDataURL(file);
+  localStorage.setItem('asked_camera', 'true');
+  // カメラなしではAI分析できないため、セッションを開始しない
+  addLog('system', 'カメラが許可されていないため、\n作業を開始できません');
 }
 
 // =============================================================================
@@ -611,6 +600,9 @@ function handleModeUpdate(result) {
  * @param {string} [lang='ja-JP'] - 言語コード
  */
 function speak(text, lang = 'ja-JP') {
+  if (!state.permissions.voice) {
+    return;
+  }
   if (!('speechSynthesis' in window)) {
     console.warn('[Speech] Web Speech API is not supported');
     return;

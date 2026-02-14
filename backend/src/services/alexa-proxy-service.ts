@@ -186,18 +186,13 @@ export function createAlexaProxyService(
   async function startProxySession(
     uid: string
   ): Promise<Result<ProxySession, AlexaProxyError>> {
-    // Check for duplicate active session for this user
+    // Auto-cleanup existing active session for this user (e.g. popup closed without completing)
     const existingSessionId = uidToSessionId.get(uid);
     if (existingSessionId !== undefined) {
       const existing = sessions.get(existingSessionId);
       if (existing && existing.status === 'active') {
-        return {
-          ok: false,
-          error: {
-            code: 'SESSION_ALREADY_ACTIVE',
-            message: `User ${uid} already has an active proxy session: ${existingSessionId}`,
-          },
-        };
+        console.log(`[AlexaProxyService] Auto-cleaning up stale session ${existingSessionId} for user ${uid}`);
+        cleanupSession(existing);
       }
     }
 

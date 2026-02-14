@@ -689,8 +689,8 @@ describe('E2E Integration: Alexa Proxy Authentication Flow', () => {
   // Flow 4: Duplicate Session Prevention (Full Stack)
   // Requirements: 1.1, 5.1
   // ---------------------------------------------------------------------------
-  describe('Duplicate session prevention across full stack', () => {
-    it('should return 409 when same user tries to start a second session', async () => {
+  describe('Duplicate session auto-cleanup across full stack', () => {
+    it('should auto-cleanup existing session and start a new one for same user', async () => {
       credentialService = createMockCredentialService();
       const mockCreateFn = createMockCreateAlexaServiceFn(54321);
       const alexaProxyService = createAlexaProxyService({
@@ -701,16 +701,16 @@ describe('E2E Integration: Alexa Proxy Authentication Flow', () => {
       const app = createE2EApp({ user: testUser, alexaProxyService });
 
       // Start first session
-      await request(app)
+      const firstResponse = await request(app)
         .post('/api/alexa-auth/start')
         .expect(200);
 
-      // Try to start second session
-      const response = await request(app)
+      // Start second session (should succeed, auto-cleaning up the first)
+      const secondResponse = await request(app)
         .post('/api/alexa-auth/start')
-        .expect(409);
+        .expect(200);
 
-      expect(response.body.error).toBe('SESSION_ALREADY_ACTIVE');
+      expect(secondResponse.body.sessionId).not.toBe(firstResponse.body.sessionId);
     });
 
     it('should allow different users to have concurrent sessions', async () => {

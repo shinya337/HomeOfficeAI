@@ -68,7 +68,7 @@ export function createCredentialSettings({ auth, backendApi, onCredentialChange 
     // Section title
     const title = document.createElement('h3');
     title.className = 'settings-section-title';
-    title.textContent = 'IoT\u30AF\u30EC\u30C7\u30F3\u30B7\u30E3\u30EB';
+    title.textContent = 'IoT\u9023\u643A';
     section.appendChild(title);
 
     if (isAuthenticated) {
@@ -119,46 +119,60 @@ export function createCredentialSettings({ auth, backendApi, onCredentialChange 
     const serviceItem = document.createElement('div');
     serviceItem.className = 'credential-service-item';
 
-    // Service label and status
+    // Header with label, status, and delete button
     const header = document.createElement('div');
     header.className = 'credential-service-header';
 
     const label = document.createElement('span');
     label.className = 'credential-service-label';
-    label.textContent = 'Nature Remo \u30C8\u30FC\u30AF\u30F3';
+    label.textContent = 'Nature Remo';
+
+    const headerRight = document.createElement('div');
+    headerRight.className = 'credential-header-right';
 
     const status = document.createElement('span');
-    status.className = 'credential-configured-status';
+    status.className = 'credential-configured-status ' + (isConfigured ? 'configured' : 'unconfigured');
     status.textContent = isConfigured
-      ? '\u2705 \u8A2D\u5B9A\u6E08\u307F'
-      : '\u26A0 \u672A\u8A2D\u5B9A';
+      ? '\u8A2D\u5B9A\u6E08\u307F'
+      : '\u672A\u8A2D\u5B9A';
 
+    const deleteButton = document.createElement('button');
+    deleteButton.className = 'credential-delete-button';
+    deleteButton.textContent = '\u524A\u9664';
+    deleteButton.type = 'button';
+    if (!isConfigured) deleteButton.style.display = 'none';
+
+    headerRight.appendChild(status);
+    headerRight.appendChild(deleteButton);
     header.appendChild(label);
-    header.appendChild(status);
+    header.appendChild(headerRight);
     serviceItem.appendChild(header);
 
-    // Input row
+    // Input row (hidden when configured)
     const inputRow = document.createElement('div');
     inputRow.className = 'credential-input-row';
+    if (isConfigured) inputRow.style.display = 'none';
 
     const input = document.createElement('input');
     input.type = 'password';
     input.className = 'credential-token-input';
-    input.placeholder = 'Nature Remo API\u30C8\u30FC\u30AF\u30F3\u3092\u5165\u529B';
+    input.placeholder = 'API\u30C8\u30FC\u30AF\u30F3\u3092\u5165\u529B';
 
     const saveButton = document.createElement('button');
     saveButton.className = 'credential-save-button';
     saveButton.textContent = '\u4FDD\u5B58';
     saveButton.type = 'button';
 
-    const deleteButton = document.createElement('button');
-    deleteButton.className = 'credential-delete-button';
-    deleteButton.textContent = '\u524A\u9664';
-    deleteButton.type = 'button';
+    const helpLink = document.createElement('a');
+    helpLink.className = 'credential-help-link';
+    helpLink.href = 'https://home.nature.global/';
+    helpLink.target = '_blank';
+    helpLink.rel = 'noopener noreferrer';
+    helpLink.textContent = 'API\u30C8\u30FC\u30AF\u30F3\u306E\u53D6\u5F97\u306F\u3053\u3061\u3089 \u2197';
 
     inputRow.appendChild(input);
     inputRow.appendChild(saveButton);
-    inputRow.appendChild(deleteButton);
+    inputRow.appendChild(helpLink);
     serviceItem.appendChild(inputRow);
 
     // Feedback area
@@ -180,7 +194,7 @@ export function createCredentialSettings({ auth, backendApi, onCredentialChange 
     const serviceItem = document.createElement('div');
     serviceItem.className = 'credential-service-item alexa-credential-section';
 
-    // Service label and status
+    // Header with label, status, and delete button
     const header = document.createElement('div');
     header.className = 'credential-service-header';
 
@@ -188,33 +202,39 @@ export function createCredentialSettings({ auth, backendApi, onCredentialChange 
     label.className = 'credential-service-label';
     label.textContent = 'Alexa';
 
-    const status = document.createElement('span');
-    status.className = 'credential-configured-status';
-    status.textContent = isAlexaConfigured
-      ? '\u2705 \u8A2D\u5B9A\u6E08\u307F'
-      : '\u26A0 \u672A\u8A2D\u5B9A';
+    const headerRight = document.createElement('div');
+    headerRight.className = 'credential-header-right';
 
+    const status = document.createElement('span');
+    status.className = 'credential-configured-status ' + (isAlexaConfigured ? 'configured' : 'unconfigured');
+    status.textContent = isAlexaConfigured
+      ? '\u8A2D\u5B9A\u6E08\u307F'
+      : '\u672A\u8A2D\u5B9A';
+
+    const deleteButton = document.createElement('button');
+    deleteButton.className = 'credential-delete-button';
+    deleteButton.textContent = '\u524A\u9664';
+    deleteButton.type = 'button';
+    if (!isAlexaConfigured) deleteButton.style.display = 'none';
+
+    headerRight.appendChild(status);
+    headerRight.appendChild(deleteButton);
     header.appendChild(label);
-    header.appendChild(status);
+    header.appendChild(headerRight);
     serviceItem.appendChild(header);
 
-    // Action row with auth start button and delete button
-    const actionRow = document.createElement('div');
-    actionRow.className = 'credential-input-row';
+    // Auth start row (hidden when configured)
+    const authRow = document.createElement('div');
+    authRow.className = 'credential-input-row';
+    if (isAlexaConfigured) authRow.style.display = 'none';
 
     const authButton = document.createElement('button');
     authButton.className = 'alexa-auth-start-button';
     authButton.textContent = '\u8A8D\u8A3C\u958B\u59CB';
     authButton.type = 'button';
 
-    const deleteButton = document.createElement('button');
-    deleteButton.className = 'credential-delete-button';
-    deleteButton.textContent = '\u524A\u9664';
-    deleteButton.type = 'button';
-
-    actionRow.appendChild(authButton);
-    actionRow.appendChild(deleteButton);
-    serviceItem.appendChild(actionRow);
+    authRow.appendChild(authButton);
+    serviceItem.appendChild(authRow);
 
     // Feedback area
     const feedback = document.createElement('div');
@@ -443,23 +463,29 @@ export function createCredentialSettings({ auth, backendApi, onCredentialChange 
 
     // Update status displays
     if (containerElement) {
-      // Update Nature Remo status
+      // Update Nature Remo status and input visibility
       const natureRemoSection = containerElement.querySelector('.credential-service-item:not(.alexa-credential-section)');
       const natureRemoStatus = natureRemoSection?.querySelector('.credential-configured-status');
       if (natureRemoStatus) {
-        natureRemoStatus.textContent = isConfigured
-          ? '\u2705 \u8A2D\u5B9A\u6E08\u307F'
-          : '\u26A0 \u672A\u8A2D\u5B9A';
+        natureRemoStatus.textContent = isConfigured ? '\u8A2D\u5B9A\u6E08\u307F' : '\u672A\u8A2D\u5B9A';
+        natureRemoStatus.className = 'credential-configured-status ' + (isConfigured ? 'configured' : 'unconfigured');
       }
+      const natureRemoInputRow = natureRemoSection?.querySelector('.credential-input-row');
+      if (natureRemoInputRow) natureRemoInputRow.style.display = isConfigured ? 'none' : '';
+      const natureRemoDeleteBtn = natureRemoSection?.querySelector('.credential-delete-button');
+      if (natureRemoDeleteBtn) natureRemoDeleteBtn.style.display = isConfigured ? '' : 'none';
 
-      // Update Alexa status
+      // Update Alexa status and button visibility
       const alexaSection = containerElement.querySelector('.alexa-credential-section');
       const alexaStatus = alexaSection?.querySelector('.credential-configured-status');
       if (alexaStatus) {
-        alexaStatus.textContent = isAlexaConfigured
-          ? '\u2705 \u8A2D\u5B9A\u6E08\u307F'
-          : '\u26A0 \u672A\u8A2D\u5B9A';
+        alexaStatus.textContent = isAlexaConfigured ? '\u8A2D\u5B9A\u6E08\u307F' : '\u672A\u8A2D\u5B9A';
+        alexaStatus.className = 'credential-configured-status ' + (isAlexaConfigured ? 'configured' : 'unconfigured');
       }
+      const alexaAuthRow = alexaSection?.querySelector('.credential-input-row');
+      if (alexaAuthRow) alexaAuthRow.style.display = isAlexaConfigured ? 'none' : '';
+      const alexaDeleteBtn = alexaSection?.querySelector('.credential-delete-button');
+      if (alexaDeleteBtn) alexaDeleteBtn.style.display = isAlexaConfigured ? '' : 'none';
     }
   }
 

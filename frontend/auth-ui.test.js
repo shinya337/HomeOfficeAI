@@ -379,7 +379,8 @@ describe('Auth UI Module (Task 8.1)', () => {
       const userInfo = container.querySelector('.auth-user-info');
 
       expect(loginButton.classList.contains('hidden')).toBe(false);
-      expect(guestBadge.classList.contains('hidden')).toBe(false);
+      // Guest badge is always hidden now
+      expect(guestBadge.classList.contains('hidden')).toBe(true);
       expect(userInfo.classList.contains('hidden')).toBe(true);
     });
 
@@ -640,13 +641,13 @@ describe('Auth UI Module (Task 8.1)', () => {
       // Logout
       mockAuth._emitStateChange({ user: null, isAuthenticated: false, isLoading: false });
 
-      // Both login button and guest badge must be visible
+      // Login button must be visible, guest badge is always hidden
       const loginButton = container.querySelector('.auth-login-button');
       const guestBadge = container.querySelector('.auth-guest-badge');
       expect(loginButton).not.toBeNull();
       expect(guestBadge).not.toBeNull();
       expect(loginButton.classList.contains('hidden')).toBe(false);
-      expect(guestBadge.classList.contains('hidden')).toBe(false);
+      expect(guestBadge.classList.contains('hidden')).toBe(true);
     });
 
     it('should not throw if updateUI is called after rootElement children are externally modified', () => {
@@ -723,7 +724,7 @@ describe('Auth UI Module (Task 8.1)', () => {
       const userInfo = container.querySelector('.auth-user-info');
 
       expect(loginButton.classList.contains('hidden')).toBe(false);
-      expect(guestBadge.classList.contains('hidden')).toBe(false);
+      expect(guestBadge.classList.contains('hidden')).toBe(true);
       expect(userInfo.classList.contains('hidden')).toBe(true);
     });
 
@@ -745,13 +746,14 @@ describe('Auth UI Module (Task 8.1)', () => {
       // Logout - UI should recover and show guest elements
       mockAuth._emitStateChange({ user: null, isAuthenticated: false, isLoading: false });
 
-      // After recovery, login button and guest badge should be present and visible
+      // After recovery, login button and guest badge should be present
       const recoveredLoginBtn = container.querySelector('.auth-login-button');
       const recoveredBadge = container.querySelector('.auth-guest-badge');
       expect(recoveredLoginBtn).not.toBeNull();
       expect(recoveredBadge).not.toBeNull();
       expect(recoveredLoginBtn.classList.contains('hidden')).toBe(false);
-      expect(recoveredBadge.classList.contains('hidden')).toBe(false);
+      // Guest badge is always hidden now
+      expect(recoveredBadge.classList.contains('hidden')).toBe(true);
     });
 
     it('should handle loading state without throwing when DOM elements are null', () => {
