@@ -34,6 +34,8 @@ import { type FirebaseServices, getFirebaseServices, resetFirebaseServices } fro
 import { createAuthMiddleware } from './middleware/auth-middleware.js';
 import { createCredentialRoutes } from './handlers/credential-handler.js';
 import { createCredentialService, type CredentialService } from './services/credential-service.js';
+import { createPreferencesRoutes } from './handlers/preferences-handler.js';
+import { createPreferencesService, type PreferencesService } from './services/preferences-service.js';
 import { createEncryptionService } from './services/encryption-service.js';
 import { loadCredentialEncryptionKey } from './config/credential-env.js';
 // Alexa Proxy Auth integration (Task 3.3, Requirements: 1.5, 5.3)
@@ -138,6 +140,7 @@ let sharedAlexaService: AlexaService | null = null;
 let alexaServiceInitPromise: Promise<AlexaService> | null = null;
 let sharedCredentialService: CredentialService | null = null;
 let sharedAlexaProxyService: AlexaProxyServiceType | null = null;
+let sharedPreferencesService: PreferencesService | null = null;
 
 /**
  * Get or create the shared session manager instance
@@ -268,6 +271,7 @@ export function resetAlexaService(): void {
  */
 export function resetFirebaseIntegration(): void {
   sharedCredentialService = null;
+  sharedPreferencesService = null;
   resetFirebaseServices();
 }
 
@@ -564,6 +568,12 @@ export function createApp(options?: CreateAppOptions): Express {
       app.use('/api/alexa-auth/proxy/:sessionId', createAlexaReverseProxyMiddleware({ alexaProxyService }));
       app.use('/api/alexa-auth', requireAuth, createAlexaProxyRoutes({ alexaProxyService }));
     }
+
+    // Register preferences routes (user settings persistence)
+    if (sharedPreferencesService === null) {
+      sharedPreferencesService = createPreferencesService({ firestore: firebaseServices.firestore });
+    }
+    app.use('/api/preferences', requireAuth, createPreferencesRoutes({ preferencesService: sharedPreferencesService }));
 
     console.log('[Server] Firebase Auth middleware enabled on /api routes');
   } else {

@@ -494,3 +494,55 @@ export async function deleteCredential(service) {
   }
 }
 
+/**
+ * Save user preferences to Firestore
+ *
+ * Calls PUT /api/preferences with camera, voice, and selectedDevices.
+ * Requires authentication.
+ *
+ * @param {{ camera: boolean, voice: boolean, selectedDevices: Array }} preferences
+ * @returns {Promise<{ok: boolean}>} Save result
+ * @throws {ApiError} On validation error (400), auth error (401), or server error (500)
+ */
+export async function savePreferences(preferences) {
+  try {
+    const headers = await buildHeaders();
+    const response = await fetch(`${API_BASE}/api/preferences`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify(preferences),
+    });
+    return handleResponse(response);
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
+    throw new ApiError('NETWORK_ERROR', error.message);
+  }
+}
+
+/**
+ * Get user preferences from Firestore
+ *
+ * Calls GET /api/preferences.
+ * Requires authentication. Returns { preferences: null } if not yet saved.
+ *
+ * @returns {Promise<{preferences: {camera: boolean, voice: boolean, selectedDevices: Array, updatedAt: string} | null}>}
+ * @throws {ApiError} On auth error (401) or server error (500)
+ */
+export async function getPreferences() {
+  try {
+    const headers = await buildHeaders();
+    const response = await fetch(`${API_BASE}/api/preferences`, {
+      method: 'GET',
+      headers,
+    });
+    return handleResponse(response);
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
+    throw new ApiError('NETWORK_ERROR', error.message);
+  }
+}
+
