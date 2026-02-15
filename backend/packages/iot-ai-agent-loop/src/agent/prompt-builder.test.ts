@@ -252,6 +252,116 @@ describe('buildPrompt', () => {
   });
 
   // ==========================================================================
+  // Req 4.1, 4.2, 4.3: 動的照明シグナル対応 (dynamic-light-signals)
+  // ==========================================================================
+  describe('動的照明シグナル対応', () => {
+    // Req 4.1: シグナルありの場合、break_mode説明にリラックス系シグナル名を動的に含める
+    describe('lightSignals が提供された場合', () => {
+      it('休憩検出セクションにリラックス系シグナル名が動的に含まれる (Req 4.1)', () => {
+        const signals = ['安らぎ', '通常', '読書', '家事'];
+        const result = buildPrompt(undefined, undefined, signals);
+        expect(result).toContain('安らぎ');
+        expect(result).toContain('休憩検出時のアクション');
+      });
+
+      it('作業開始・復帰セクションに通常系シグナル名が動的に含まれる (Req 4.1)', () => {
+        const signals = ['安らぎ', '通常', '読書', '家事'];
+        const result = buildPrompt(undefined, undefined, signals);
+        // focus_mode section should reference 通常 signal
+        expect(result).toMatch(/作業開始.*通常/s);
+      });
+
+      it('リラックス系シグナルが複数ある場合、最優先のものが使われる', () => {
+        const signals = ['くつろぎモード', 'リラックスタイム'];
+        const result = buildPrompt(undefined, undefined, signals);
+        // くつろぎ is higher priority than リラックス
+        expect(result).toContain('くつろぎモード');
+      });
+
+      it('通常系シグナルが複数ある場合、最優先のものが使われる', () => {
+        const signals = ['標準モード', 'ノーマル'];
+        const result = buildPrompt(undefined, undefined, signals);
+        // 標準 is higher priority than ノーマル
+        expect(result).toContain('標準モード');
+      });
+
+      it('リラックス系シグナルがないがシグナル配列は提供されている場合、標準ボタンの説明を使う', () => {
+        const signals = ['読書', '家事'];  // no relax keyword
+        const result = buildPrompt(undefined, undefined, signals);
+        expect(result).toContain('お気に入りモード');
+        expect(result).not.toMatch(/照明を安らぎモードに切り替え/);
+      });
+
+      it('通常系シグナルがないがシグナル配列は提供されている場合、標準ボタンの説明を使う', () => {
+        const signals = ['読書', '家事'];  // no normal keyword
+        const result = buildPrompt(undefined, undefined, signals);
+        expect(result).toContain('全灯（on-100）');
+        expect(result).not.toMatch(/照明を通常モードに切り替え/);
+      });
+    });
+
+    // Req 4.2: シグナルなしの場合、標準ボタンのみの説明を含める
+    describe('lightSignals が提供されていない場合', () => {
+      it('休憩検出セクションに標準ボタンベースの説明が含まれる (Req 4.2)', () => {
+        const result = buildPrompt(undefined, undefined, undefined);
+        expect(result).toContain('お気に入りモード');
+      });
+
+      it('作業開始・復帰セクションに標準ボタンベースの説明が含まれる (Req 4.2)', () => {
+        const result = buildPrompt(undefined, undefined, undefined);
+        expect(result).toContain('全灯（on-100）');
+      });
+
+      it('空配列の場合も標準ボタンベースの説明が含まれる', () => {
+        const result = buildPrompt(undefined, undefined, []);
+        expect(result).toContain('お気に入りモード');
+        expect(result).toContain('全灯（on-100）');
+      });
+    });
+
+    // Req 4.3: ハードコードされたシグナル名を含めない
+    describe('ハードコード排除 (Req 4.3)', () => {
+      it('lightSignals未提供時にハードコードされた「安らぎモード」がプロンプトに含まれない', () => {
+        const result = buildPrompt(undefined, undefined, undefined);
+        expect(result).not.toContain('安らぎモード');
+      });
+
+      it('lightSignals未提供時にハードコードされた「照明を安らぎ」がプロンプトに含まれない', () => {
+        const result = buildPrompt(undefined, undefined, undefined);
+        expect(result).not.toMatch(/照明を安らぎ/);
+      });
+
+      it('lightSignals空配列時にハードコードされたシグナル名がプロンプトに含まれない', () => {
+        const result = buildPrompt(undefined, undefined, []);
+        expect(result).not.toContain('安らぎモード');
+      });
+    });
+
+    // デバイス状態とシグナルの併用
+    describe('deviceState と lightSignals の併用', () => {
+      it('デバイス状態とシグナル情報の両方がプロンプトに反映される', () => {
+        const state: DeviceState = {
+          light: { power: 'on' },
+          aircon: { temperature: '26', mode: 'cool' },
+        };
+        const signals = ['安らぎ', '通常'];
+        const result = buildPrompt(state, undefined, signals);
+        expect(result).toContain('現在のデバイス状態');
+        expect(result).toContain('照明: ON');
+        expect(result).toContain('安らぎ');
+      });
+
+      it('アクション履歴とシグナル情報の両方がプロンプトに反映される', () => {
+        const actions = [{ tool: 'break_mode' as const, params: { reason: '休憩検出' } }];
+        const signals = ['安らぎ', '通常'];
+        const result = buildPrompt(undefined, actions, signals);
+        expect(result).toContain('直近のアクション履歴');
+        expect(result).toContain('安らぎ');
+      });
+    });
+  });
+
+  // ==========================================================================
   // 確認監視（continue_monitoring）必須化ルール
   // ==========================================================================
   describe('モード切り替え確認監視ルール', () => {

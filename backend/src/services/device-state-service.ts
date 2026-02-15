@@ -224,7 +224,7 @@ export function createDeviceStateService(
       allowedDevices: readonly AllowedDevice[] | undefined
     ): Promise<Result<FilteredDeviceState, DeviceStateError>> {
       // Fetch all appliances from Nature Remo API (if available)
-      let appliances: import('../../packages/nature-remo/src/types/types.js').Appliance[] = [];
+      let appliances: ApplianceInfo[] = [];
       if (applianceService) {
         const apiResult = await applianceService.getAppliances();
         if (!apiResult.success) {

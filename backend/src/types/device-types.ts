@@ -18,6 +18,7 @@ export interface Device {
   readonly id: string;
   readonly name: string;
   readonly type: DeviceType;
+  readonly signals?: readonly string[];
 }
 
 /**
@@ -28,6 +29,7 @@ export interface AllowedDevice {
   readonly id: string;
   readonly type: DeviceType;
   readonly allowedTools?: readonly string[];  // undefined = 全ツール許可
+  readonly signals?: readonly string[];
 }
 
 /**

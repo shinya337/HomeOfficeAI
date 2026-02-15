@@ -134,13 +134,26 @@ function mapToDeviceType(applianceType: string): DeviceType {
 /**
  * Convert ApplianceInfo to Device
  * Normalizes the response format (nickname -> name)
+ * Propagates signals for LIGHT devices (Task 1.2, Req 1.1, 1.2)
  */
 function toDevice(appliance: ApplianceInfo): Device {
-  return {
+  const device: Device = {
     id: appliance.id,
     name: appliance.nickname,
     type: mapToDeviceType(appliance.type),
   };
+
+  // Propagate signals for LIGHT devices (Req 1.1, 1.2)
+  if (appliance.signals !== undefined) {
+    return { ...device, signals: appliance.signals };
+  }
+
+  // LIGHT without signals gets empty array (Req 1.2)
+  if (device.type === 'LIGHT') {
+    return { ...device, signals: [] };
+  }
+
+  return device;
 }
 
 /**

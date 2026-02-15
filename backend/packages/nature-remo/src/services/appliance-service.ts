@@ -58,6 +58,8 @@ export interface ApplianceInfo {
   airconSettings?: AirconCurrentSettings;
   /** Light state (only for LIGHT type with state) */
   lightState?: LightCurrentState;
+  /** Custom signal names (only for LIGHT type) */
+  signals?: readonly string[];
 }
 
 /**
@@ -135,6 +137,11 @@ export function createApplianceService(client: NatureRemoClient): ApplianceServi
     // Add light state if LIGHT type and state exists (Req 3.4)
     if (appliance.type === 'LIGHT' && appliance.light?.state) {
       info.lightState = formatLightState(appliance.light.state);
+    }
+
+    // Extract signal names for LIGHT type (dynamic-light-signals Req 1.1, 1.2)
+    if (appliance.type === 'LIGHT') {
+      info.signals = appliance.signals?.map(s => s.name) ?? [];
     }
 
     return info;

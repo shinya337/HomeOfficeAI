@@ -12,10 +12,12 @@ import {
   DEVICE_TYPE_TO_TOOL_MAP,
   ALWAYS_INCLUDED_TOOLS,
   ALEXA_TOOLS,
+  STANDARD_LIGHT_ACTIONS,
   getToolForDeviceType,
   getAlwaysIncludedTools,
   getAllDeviceTypes,
   getAlexaTools,
+  buildLightControlDeclaration,
   lightControlDeclaration,
   airconControlDeclaration,
   tvControlDeclaration,
@@ -190,14 +192,13 @@ describe('Tool Definitions - light_control', () => {
     expect(lightControlDeclaration.parameters!.type).toBe(SchemaType.OBJECT);
   });
 
-  it('should have action parameter with all LightButton enum values and preset names', () => {
+  it('should have action parameter with standard light buttons only (no hardcoded signals)', () => {
     const props = lightControlDeclaration.parameters!.properties;
     expect(props['action']).toBeDefined();
     expect(props['action'].type).toBe(SchemaType.STRING);
     expect(props['action'].enum).toEqual([
       'on', 'off', 'on-100', 'on-favorite', 'night',
       'bright-up', 'bright-down', 'colortemp-up', 'colortemp-down',
-      '安らぎ', '読書', '家事',
     ]);
   });
 
@@ -680,5 +681,147 @@ describe('getAlexaTools', () => {
     const tools2 = getAlexaTools();
     expect(tools1).not.toBe(tools2);
     expect(tools1).toEqual(tools2);
+  });
+});
+
+// =============================================================================
+// Dynamic light_control Tool Builder (Task 2.2)
+// Requirements: 2.1, 2.2, 2.3, 2.4
+// =============================================================================
+
+describe('STANDARD_LIGHT_ACTIONS', () => {
+  it('should contain all 9 standard light buttons', () => {
+    expect(STANDARD_LIGHT_ACTIONS).toEqual([
+      'on', 'off', 'on-100', 'on-favorite', 'night',
+      'bright-up', 'bright-down', 'colortemp-up', 'colortemp-down',
+    ]);
+  });
+
+  it('should be a readonly array', () => {
+    expect(Array.isArray(STANDARD_LIGHT_ACTIONS)).toBe(true);
+    expect(STANDARD_LIGHT_ACTIONS).toHaveLength(9);
+  });
+
+  it('should NOT contain any hardcoded signal names', () => {
+    const hardcodedSignals = ['安らぎ', '読書', '家事', '通常'];
+    for (const signal of hardcodedSignals) {
+      expect(STANDARD_LIGHT_ACTIONS).not.toContain(signal);
+    }
+  });
+});
+
+describe('buildLightControlDeclaration', () => {
+  describe('with empty signals', () => {
+    it('should return a FunctionDeclaration with name "light_control"', () => {
+      const decl = buildLightControlDeclaration([]);
+      expect(decl.name).toBe('light_control');
+    });
+
+    it('should have only standard buttons in enum when signals is empty', () => {
+      const decl = buildLightControlDeclaration([]);
+      const actionProp = decl.parameters!.properties['action']!;
+      expect(actionProp.enum).toEqual([
+        'on', 'off', 'on-100', 'on-favorite', 'night',
+        'bright-up', 'bright-down', 'colortemp-up', 'colortemp-down',
+      ]);
+    });
+
+    it('should have parameters of type OBJECT', () => {
+      const decl = buildLightControlDeclaration([]);
+      expect(decl.parameters!.type).toBe(SchemaType.OBJECT);
+    });
+
+    it('should require action and reason parameters', () => {
+      const decl = buildLightControlDeclaration([]);
+      expect(decl.parameters!.required).toEqual(['action', 'reason']);
+    });
+
+    it('should have a description without custom signal explanations', () => {
+      const decl = buildLightControlDeclaration([]);
+      expect(decl.description).toBeDefined();
+      expect(decl.description!.length).toBeGreaterThan(0);
+      // Should not mention custom signal names
+      expect(decl.description).not.toContain('安らぎ');
+      expect(decl.description).not.toContain('読書');
+      expect(decl.description).not.toContain('家事');
+    });
+  });
+
+  describe('with custom signals', () => {
+    it('should include custom signals in enum after standard buttons', () => {
+      const decl = buildLightControlDeclaration(['安らぎ', '読書', '家事']);
+      const actionProp = decl.parameters!.properties['action']!;
+      expect(actionProp.enum).toEqual([
+        'on', 'off', 'on-100', 'on-favorite', 'night',
+        'bright-up', 'bright-down', 'colortemp-up', 'colortemp-down',
+        '安らぎ', '読書', '家事',
+      ]);
+    });
+
+    it('should include signal descriptions in the description field', () => {
+      const decl = buildLightControlDeclaration(['安らぎ', '読書']);
+      expect(decl.description).toContain('安らぎ');
+      expect(decl.description).toContain('読書');
+    });
+
+    it('should describe each signal as a custom mode', () => {
+      const decl = buildLightControlDeclaration(['安らぎ']);
+      // Per design: "{シグナル名}: カスタムモード" format
+      expect(decl.description).toContain('安らぎ: カスタムモード');
+    });
+
+    it('should include all custom signal descriptions', () => {
+      const decl = buildLightControlDeclaration(['安らぎ', '読書', '家事']);
+      expect(decl.description).toContain('安らぎ: カスタムモード');
+      expect(decl.description).toContain('読書: カスタムモード');
+      expect(decl.description).toContain('家事: カスタムモード');
+    });
+
+    it('should include action description with standard button explanations', () => {
+      const decl = buildLightControlDeclaration(['安らぎ']);
+      const actionProp = decl.parameters!.properties['action']!;
+      // Standard button descriptions should still be present
+      expect(actionProp.description).toContain('on: 点灯');
+      expect(actionProp.description).toContain('off: 消灯');
+      expect(actionProp.description).toContain('on-100: 全灯');
+    });
+
+    it('should include custom signal explanations in action description', () => {
+      const decl = buildLightControlDeclaration(['安らぎ', '読書']);
+      const actionProp = decl.parameters!.properties['action']!;
+      expect(actionProp.description).toContain('安らぎ: カスタムモード');
+      expect(actionProp.description).toContain('読書: カスタムモード');
+    });
+  });
+
+  describe('with single signal', () => {
+    it('should work with a single custom signal', () => {
+      const decl = buildLightControlDeclaration(['くつろぎ']);
+      const actionProp = decl.parameters!.properties['action']!;
+      expect(actionProp.enum).toEqual([
+        'on', 'off', 'on-100', 'on-favorite', 'night',
+        'bright-up', 'bright-down', 'colortemp-up', 'colortemp-down',
+        'くつろぎ',
+      ]);
+      expect(decl.description).toContain('くつろぎ: カスタムモード');
+    });
+  });
+
+  describe('no hardcoded signal names (Req 2.4)', () => {
+    it('should not contain hardcoded signal names in the static lightControlDeclaration enum', () => {
+      // After task 2.2, the static lightControlDeclaration should not have hardcoded signals
+      const actionProp = lightControlDeclaration.parameters!.properties['action']!;
+      const hardcodedSignals = ['安らぎ', '読書', '家事'];
+      for (const signal of hardcodedSignals) {
+        expect(actionProp.enum).not.toContain(signal);
+      }
+    });
+
+    it('should not contain hardcoded signal names in the static lightControlDeclaration description', () => {
+      // The static declaration description should not reference specific signal names
+      expect(lightControlDeclaration.description).not.toContain('安らぎ');
+      expect(lightControlDeclaration.description).not.toContain('読書');
+      expect(lightControlDeclaration.description).not.toContain('家事');
+    });
   });
 });

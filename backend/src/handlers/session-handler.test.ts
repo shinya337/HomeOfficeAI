@@ -356,6 +356,153 @@ describe('Session Handler', () => {
   });
 
   /**
+   * Tests for signal propagation to AllowedDevice during session start
+   * Task 1.2, Requirements: 1.1, 1.2, 1.3, 1.4 (dynamic-light-signals)
+   */
+  describe('POST /api/session/start with signal propagation (Task 1.2)', () => {
+    const testDevicesWithSignals: readonly Device[] = [
+      { id: 'device-1', name: 'Living Light', type: 'LIGHT', signals: ['安らぎ', '通常', '読書'] },
+      { id: 'device-2', name: 'Bedroom AC', type: 'AC' },
+      { id: 'device-3', name: 'TV', type: 'TV' },
+    ];
+
+    // Req 1.1, 1.3: validateDeviceIds で LIGHT の signals が AllowedDevice に伝搬される
+    it('should propagate signals from cached Device to AllowedDevice for LIGHT devices', async () => {
+      const signalApp = express();
+      signalApp.use(express.json());
+      const signalDeps: SessionRouteDependencies = {
+        sessionManager: createSessionManager(),
+        getCachedDevices: () => testDevicesWithSignals,
+      };
+      signalApp.use('/api/session', createSessionRoutes(signalDeps));
+
+      const response = await request(signalApp)
+        .post('/api/session/start')
+        .send({ allowedDeviceIds: ['device-1', 'device-2'] })
+        .expect(200);
+
+      expect(response.body.allowedDevices).toHaveLength(2);
+      // LIGHT device should have signals
+      const lightDevice = response.body.allowedDevices.find((d: { id: string }) => d.id === 'device-1');
+      expect(lightDevice).toBeDefined();
+      expect(lightDevice.signals).toEqual(['安らぎ', '通常', '読書']);
+      // AC device should not have signals
+      const acDevice = response.body.allowedDevices.find((d: { id: string }) => d.id === 'device-2');
+      expect(acDevice).toBeDefined();
+      expect(acDevice.signals).toBeUndefined();
+    });
+
+    // Req 1.2: signals なしの照明で空配列として AllowedDevice に含まれる
+    it('should propagate empty signals array for LIGHT without signals', async () => {
+      const devicesNoSignals: readonly Device[] = [
+        { id: 'device-1', name: 'Basic Light', type: 'LIGHT', signals: [] },
+      ];
+
+      const signalApp = express();
+      signalApp.use(express.json());
+      const signalDeps: SessionRouteDependencies = {
+        sessionManager: createSessionManager(),
+        getCachedDevices: () => devicesNoSignals,
+      };
+      signalApp.use('/api/session', createSessionRoutes(signalDeps));
+
+      const response = await request(signalApp)
+        .post('/api/session/start')
+        .send({ allowedDeviceIds: ['device-1'] })
+        .expect(200);
+
+      expect(response.body.allowedDevices).toHaveLength(1);
+      expect(response.body.allowedDevices[0].signals).toEqual([]);
+    });
+
+    // Req 1.4: ユーザー固有のシグナルが他ユーザーと混在しない
+    it('should keep signals per user (isolated by cached device list)', async () => {
+      const userADevices: readonly Device[] = [
+        { id: 'light-a', name: 'User A Light', type: 'LIGHT', signals: ['安らぎ', '通常'] },
+      ];
+      const userBDevices: readonly Device[] = [
+        { id: 'light-b', name: 'User B Light', type: 'LIGHT', signals: ['リラックス', 'ノーマル', '読書'] },
+      ];
+
+      // User A session
+      const appA = express();
+      appA.use(express.json());
+      appA.use('/api/session', createSessionRoutes({
+        sessionManager: createSessionManager(),
+        getCachedDevices: () => userADevices,
+      }));
+
+      const responseA = await request(appA)
+        .post('/api/session/start')
+        .send({ allowedDeviceIds: ['light-a'] })
+        .expect(200);
+
+      expect(responseA.body.allowedDevices[0].signals).toEqual(['安らぎ', '通常']);
+
+      // User B session (different cached devices)
+      const appB = express();
+      appB.use(express.json());
+      appB.use('/api/session', createSessionRoutes({
+        sessionManager: createSessionManager(),
+        getCachedDevices: () => userBDevices,
+      }));
+
+      const responseB = await request(appB)
+        .post('/api/session/start')
+        .send({ allowedDeviceIds: ['light-b'] })
+        .expect(200);
+
+      expect(responseB.body.allowedDevices[0].signals).toEqual(['リラックス', 'ノーマル', '読書']);
+    });
+
+    // Signals should persist through deviceToolOverrides application
+    it('should preserve signals when deviceToolOverrides are applied', async () => {
+      const signalApp = express();
+      signalApp.use(express.json());
+      const signalDeps: SessionRouteDependencies = {
+        sessionManager: createSessionManager(),
+        getCachedDevices: () => testDevicesWithSignals,
+      };
+      signalApp.use('/api/session', createSessionRoutes(signalDeps));
+
+      const response = await request(signalApp)
+        .post('/api/session/start')
+        .send({
+          allowedDeviceIds: ['device-1'],
+          deviceToolOverrides: { 'device-1': ['light_control'] },
+        })
+        .expect(200);
+
+      expect(response.body.allowedDevices).toHaveLength(1);
+      expect(response.body.allowedDevices[0].signals).toEqual(['安らぎ', '通常', '読書']);
+      expect(response.body.allowedDevices[0].allowedTools).toEqual(['light_control']);
+    });
+
+    // Signals should appear in session status
+    it('should include signals in session status response', async () => {
+      const signalApp = express();
+      signalApp.use(express.json());
+      const signalDeps: SessionRouteDependencies = {
+        sessionManager: createSessionManager(),
+        getCachedDevices: () => testDevicesWithSignals,
+      };
+      signalApp.use('/api/session', createSessionRoutes(signalDeps));
+
+      await request(signalApp)
+        .post('/api/session/start')
+        .send({ allowedDeviceIds: ['device-1'] })
+        .expect(200);
+
+      const statusResponse = await request(signalApp)
+        .get('/api/session/status')
+        .expect(200);
+
+      expect(statusResponse.body.hasActiveSession).toBe(true);
+      expect(statusResponse.body.session.allowedDevices[0].signals).toEqual(['安らぎ', '通常', '読書']);
+    });
+  });
+
+  /**
    * Tests for IoT client dynamic generation at session start
    * Task 6.2, Requirements: 6.1, 6.2, 6.3, 6.5
    */

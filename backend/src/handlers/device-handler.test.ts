@@ -108,6 +108,7 @@ describe('DeviceHandler', () => {
         id: 'light-1',
         name: 'Living Room Light',
         type: 'LIGHT',
+        signals: [],  // LIGHT devices always include signals (Task 1.2)
       });
       expect(response.body.devices[1]).toEqual({
         id: 'ac-1',
@@ -189,7 +190,7 @@ describe('DeviceHandler', () => {
       await request(app).get('/api/devices');
 
       expect(mockSetCachedDevices).toHaveBeenCalledWith([
-        { id: 'light-1', name: 'Living Light', type: 'LIGHT' },
+        { id: 'light-1', name: 'Living Light', type: 'LIGHT', signals: [] },  // LIGHT always includes signals (Task 1.2)
       ]);
     });
 
@@ -224,6 +225,149 @@ describe('DeviceHandler', () => {
 
       expect(response.status).toBe(200);
       expect(response.body.devices[0].type).toBe('IR');
+    });
+  });
+
+  // ==========================================================================
+  // Task 1.2: toDevice でシグナル情報を抽出しキャッシュに含める
+  // Requirements: 1.1, 1.2, 1.3, 1.4
+  // ==========================================================================
+  describe('toDevice signal propagation (Task 1.2)', () => {
+    // Req 1.1: LIGHT appliance の signals を Device.signals にマッピングする
+    it('should propagate signals from LIGHT ApplianceInfo to Device', async () => {
+      const mockAppliances: ApplianceInfo[] = [
+        { id: 'light-1', nickname: 'Living Light', type: 'LIGHT', signals: ['安らぎ', '通常', '読書'] },
+      ];
+      vi.mocked(mockApplianceService.getAppliances).mockResolvedValue({
+        success: true,
+        data: mockAppliances,
+      });
+      mockGetCachedDevices.mockReturnValue(null);
+
+      const app = createTestApp(deps);
+      const response = await request(app).get('/api/devices');
+
+      expect(response.status).toBe(200);
+      expect(response.body.devices[0]).toEqual({
+        id: 'light-1',
+        name: 'Living Light',
+        type: 'LIGHT',
+        signals: ['安らぎ', '通常', '読書'],
+      });
+    });
+
+    // Req 1.2: signals なしの照明で空配列として正常にデバイス一覧が返る
+    it('should set empty signals array for LIGHT without signals', async () => {
+      const mockAppliances: ApplianceInfo[] = [
+        { id: 'light-1', nickname: 'Basic Light', type: 'LIGHT', signals: [] },
+      ];
+      vi.mocked(mockApplianceService.getAppliances).mockResolvedValue({
+        success: true,
+        data: mockAppliances,
+      });
+      mockGetCachedDevices.mockReturnValue(null);
+
+      const app = createTestApp(deps);
+      const response = await request(app).get('/api/devices');
+
+      expect(response.status).toBe(200);
+      expect(response.body.devices[0].signals).toEqual([]);
+    });
+
+    // Req 1.2: signals undefined の LIGHT でも空配列として返す
+    it('should set empty signals array for LIGHT with undefined signals', async () => {
+      const mockAppliances: ApplianceInfo[] = [
+        { id: 'light-1', nickname: 'Old Light', type: 'LIGHT' },
+      ];
+      vi.mocked(mockApplianceService.getAppliances).mockResolvedValue({
+        success: true,
+        data: mockAppliances,
+      });
+      mockGetCachedDevices.mockReturnValue(null);
+
+      const app = createTestApp(deps);
+      const response = await request(app).get('/api/devices');
+
+      expect(response.status).toBe(200);
+      expect(response.body.devices[0].signals).toEqual([]);
+    });
+
+    // Non-LIGHT devices should not have signals
+    it('should not include signals for non-LIGHT devices', async () => {
+      const mockAppliances: ApplianceInfo[] = [
+        { id: 'ac-1', nickname: 'Living AC', type: 'AC' },
+        { id: 'tv-1', nickname: 'Living TV', type: 'TV' },
+      ];
+      vi.mocked(mockApplianceService.getAppliances).mockResolvedValue({
+        success: true,
+        data: mockAppliances,
+      });
+      mockGetCachedDevices.mockReturnValue(null);
+
+      const app = createTestApp(deps);
+      const response = await request(app).get('/api/devices');
+
+      expect(response.status).toBe(200);
+      expect(response.body.devices[0].signals).toBeUndefined();
+      expect(response.body.devices[1].signals).toBeUndefined();
+    });
+
+    // Req 1.3: キャッシュにシグナル情報が含まれる（追加APIリクエストなし）
+    it('should cache Device with signals without additional API requests', async () => {
+      const mockAppliances: ApplianceInfo[] = [
+        { id: 'light-1', nickname: 'Living Light', type: 'LIGHT', signals: ['安らぎ', '通常'] },
+      ];
+      vi.mocked(mockApplianceService.getAppliances).mockResolvedValue({
+        success: true,
+        data: mockAppliances,
+      });
+      mockGetCachedDevices.mockReturnValue(null);
+
+      const app = createTestApp(deps);
+      await request(app).get('/api/devices');
+
+      // Verify setCachedDevices was called with signals included
+      expect(mockSetCachedDevices).toHaveBeenCalledWith([
+        { id: 'light-1', name: 'Living Light', type: 'LIGHT', signals: ['安らぎ', '通常'] },
+      ]);
+    });
+
+    // Req 1.3: キャッシュ返却時もシグナル情報が含まれる
+    it('should return signals from cache when cache is valid', async () => {
+      const cachedDevices = [
+        { id: 'light-1', name: 'Cached Light', type: 'LIGHT' as const, signals: ['安らぎ', '通常'] },
+      ];
+      mockGetCachedDevices.mockReturnValue(cachedDevices);
+
+      const app = createTestApp(deps);
+      const response = await request(app).get('/api/devices');
+
+      expect(response.status).toBe(200);
+      expect(response.body.devices[0].signals).toEqual(['安らぎ', '通常']);
+      // No API call should be made
+      expect(mockApplianceService.getAppliances).not.toHaveBeenCalled();
+    });
+
+    // Mixed device types: signals only on LIGHT
+    it('should correctly propagate signals for mixed device types', async () => {
+      const mockAppliances: ApplianceInfo[] = [
+        { id: 'light-1', nickname: 'Living Light', type: 'LIGHT', signals: ['安らぎ', '通常', '読書', '家事'] },
+        { id: 'ac-1', nickname: 'Living AC', type: 'AC' },
+        { id: 'tv-1', nickname: 'Living TV', type: 'TV' },
+      ];
+      vi.mocked(mockApplianceService.getAppliances).mockResolvedValue({
+        success: true,
+        data: mockAppliances,
+      });
+      mockGetCachedDevices.mockReturnValue(null);
+
+      const app = createTestApp(deps);
+      const response = await request(app).get('/api/devices');
+
+      expect(response.status).toBe(200);
+      expect(response.body.devices[0].signals).toEqual(['安らぎ', '通常', '読書', '家事']);
+      expect(response.body.devices[1].signals).toBeUndefined();
+      expect(response.body.devices[2].signals).toBeUndefined();
     });
   });
 });

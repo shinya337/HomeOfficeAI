@@ -147,7 +147,10 @@ function validateDeviceIds(
   for (const id of deviceIds) {
     const device = deviceMap.get(id);
     if (device) {
-      validDevices.push({ id: device.id, type: device.type });
+      const allowedDevice: AllowedDevice = device.signals !== undefined
+        ? { id: device.id, type: device.type, signals: device.signals }
+        : { id: device.id, type: device.type };
+      validDevices.push(allowedDevice);
     } else {
       invalidIds.push(id);
     }

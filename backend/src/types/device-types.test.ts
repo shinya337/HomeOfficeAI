@@ -76,6 +76,38 @@ describe('Device Types', () => {
       expect(device.name).toBe('エアコン');
       expect(device.type).toBe('AC');
     });
+
+    it('should support optional signals field for LIGHT devices', () => {
+      const device: Device = {
+        id: 'light-1',
+        name: 'リビングの照明',
+        type: 'LIGHT',
+        signals: ['安らぎ', '通常', '読書', '家事'],
+      };
+
+      expect(device.signals).toEqual(['安らぎ', '通常', '読書', '家事']);
+    });
+
+    it('should allow signals to be undefined for non-LIGHT devices', () => {
+      const device: Device = {
+        id: 'ac-1',
+        name: 'エアコン',
+        type: 'AC',
+      };
+
+      expect(device.signals).toBeUndefined();
+    });
+
+    it('should support empty signals array for LIGHT without custom signals', () => {
+      const device: Device = {
+        id: 'light-2',
+        name: '寝室の照明',
+        type: 'LIGHT',
+        signals: [],
+      };
+
+      expect(device.signals).toEqual([]);
+    });
   });
 
   describe('AllowedDevice', () => {
@@ -107,6 +139,25 @@ describe('Device Types', () => {
 
       expect(allowedDevice.id).toBe('alexa-echo-1');
       expect(allowedDevice.type).toBe('ALEXA');
+    });
+
+    it('should support optional signals field for LIGHT devices', () => {
+      const allowedDevice: AllowedDevice = {
+        id: 'light-1',
+        type: 'LIGHT',
+        signals: ['安らぎ', '通常', '読書'],
+      };
+
+      expect(allowedDevice.signals).toEqual(['安らぎ', '通常', '読書']);
+    });
+
+    it('should allow signals to be undefined', () => {
+      const allowedDevice: AllowedDevice = {
+        id: 'ac-1',
+        type: 'AC',
+      };
+
+      expect(allowedDevice.signals).toBeUndefined();
     });
   });
 

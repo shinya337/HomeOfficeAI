@@ -23,6 +23,7 @@ import type {
 } from '../types/action-types.js';
 import { ok, err } from '../types/action-types.js';
 import type { AllowedDevice, DeviceType } from '../types/device-types.js';
+import { resolveRelaxSignal, resolveNormalSignal, signalToLabel } from '../services/signal-resolver.js';
 
 // =============================================================================
 // Service Interfaces
@@ -311,7 +312,9 @@ const STANDARD_LIGHT_BUTTONS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Light button action label map for human-readable messages
+ * Light button action label map for human-readable messages.
+ * Standard buttons only -- custom signal labels are generated dynamically
+ * via signalToLabel() at dispatch time.
  */
 const LIGHT_ACTION_LABEL: Record<string, string> = {
   on: 'ON',
@@ -323,9 +326,6 @@ const LIGHT_ACTION_LABEL: Record<string, string> = {
   'bright-down': '暗く',
   'colortemp-up': '寒色',
   'colortemp-down': '暖色',
-  '安らぎ': '安らぎモード',
-  '読書': '読書モード',
-  '家事': '家事モード',
 };
 
 /**
@@ -432,7 +432,9 @@ export function createActionDispatcher(
                 message: '照明デバイスが許可されていません。セッション開始時に照明を選択してください。',
               });
             }
-            const lightLabel = LIGHT_ACTION_LABEL[action.params.action] ?? action.params.action;
+            // Dynamic label: use static label for standard buttons, signalToLabel() for custom signals
+            const lightLabel = LIGHT_ACTION_LABEL[action.params.action]
+              ?? (STANDARD_LIGHT_BUTTONS.has(action.params.action) ? action.params.action : signalToLabel(action.params.action));
             const lightMsg = withReason(`照明を${lightLabel}にしました (${lightId})`, action.params.reason);
             if (!deps.lightService) {
               return ok<ActionResult>({
@@ -671,15 +673,30 @@ export function createActionDispatcher(
             const results: string[] = [];
             const errors: string[] = [];
 
-            // Sub-action 1: Light → 安らぎ
+            // Sub-action 1: Light → relax signal (dynamic) or on-favorite (fallback)
             const lightId = resolveLightId();
             if (lightId && deps.lightService) {
+              const lightDevice = allowedDevices.find(d => d.type === 'LIGHT');
+              const lightSignals = lightDevice?.signals ?? [];
+              const relaxSignal = resolveRelaxSignal(lightSignals);
+
               try {
-                const lightResult = await deps.lightService.sendNamedSignal(lightId, '安らぎ');
-                if (lightResult.success) {
-                  results.push('照明を安らぎモードに変更');
+                if (relaxSignal !== null) {
+                  // Relax signal found: use sendNamedSignal
+                  const lightResult = await deps.lightService.sendNamedSignal(lightId, relaxSignal);
+                  if (lightResult.success) {
+                    results.push(`照明を${signalToLabel(relaxSignal)}に変更`);
+                  } else {
+                    errors.push(`照明エラー: ${lightResult.error.message}`);
+                  }
                 } else {
-                  errors.push(`照明エラー: ${lightResult.error.message}`);
+                  // No relax signal: fallback to on-favorite standard button
+                  const lightResult = await deps.lightService.control(lightId, 'on-favorite');
+                  if (lightResult.success) {
+                    results.push('照明をお気に入りモードに変更');
+                  } else {
+                    errors.push(`照明エラー: ${lightResult.error.message}`);
+                  }
                 }
               } catch (e) {
                 errors.push(`照明エラー: ${e instanceof Error ? e.message : 'Unknown error'}`);
@@ -738,17 +755,33 @@ export function createActionDispatcher(
             const focusResults: string[] = [];
             const focusErrors: string[] = [];
 
-            // Sub-action 1: Light → 通常（カスタムシグナルで確実にIR送信）
+            // Sub-action 1: Light → normal signal (dynamic) or on-100 (fallback)
             const focusLightId = resolveLightId();
             console.log(`[ActionDispatcher] focus_mode: lightId=${focusLightId ?? 'なし'}, lightService=${deps.lightService ? 'あり' : 'なし'}`);
             if (focusLightId && deps.lightService) {
+              const focusLightDevice = allowedDevices.find(d => d.type === 'LIGHT');
+              const focusLightSignals = focusLightDevice?.signals ?? [];
+              const normalSignal = resolveNormalSignal(focusLightSignals);
+
               try {
-                const lightResult = await deps.lightService.sendNamedSignal(focusLightId, '通常');
-                console.log(`[ActionDispatcher] focus_mode: 照明結果=`, JSON.stringify(lightResult));
-                if (lightResult.success) {
-                  focusResults.push('照明を通常に変更');
+                if (normalSignal !== null) {
+                  // Normal signal found: use sendNamedSignal
+                  const lightResult = await deps.lightService.sendNamedSignal(focusLightId, normalSignal);
+                  console.log(`[ActionDispatcher] focus_mode: 照明結果=`, JSON.stringify(lightResult));
+                  if (lightResult.success) {
+                    focusResults.push(`照明を${signalToLabel(normalSignal)}に変更`);
+                  } else {
+                    focusErrors.push(`照明エラー: ${lightResult.error.message}`);
+                  }
                 } else {
-                  focusErrors.push(`照明エラー: ${lightResult.error.message}`);
+                  // No normal signal: fallback to on-100 standard button
+                  const lightResult = await deps.lightService.control(focusLightId, 'on-100');
+                  console.log(`[ActionDispatcher] focus_mode: 照明結果(fallback)=`, JSON.stringify(lightResult));
+                  if (lightResult.success) {
+                    focusResults.push('照明を全灯に変更');
+                  } else {
+                    focusErrors.push(`照明エラー: ${lightResult.error.message}`);
+                  }
                 }
               } catch (e) {
                 console.log(`[ActionDispatcher] focus_mode: 照明例外=`, e);

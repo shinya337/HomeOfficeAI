@@ -246,8 +246,12 @@ export function createAnalyzeHandler(
       // Step 3: Get recent action history for prompt
       const recentActions = sessionManager.getRecentActions();
 
-      // Step 4: Build prompt with device state and action history (Req 3.5, 6.3)
-      const prompt = buildPrompt(deviceState, recentActions);
+      // Step 4: Build prompt with device state, action history, and light signals (Req 3.5, 4.1, 6.3)
+      const lightSignals: readonly string[] | undefined =
+        allowedDevices !== undefined
+          ? (allowedDevices.find(d => d.type === 'LIGHT')?.signals ?? undefined)
+          : undefined;
+      const prompt = buildPrompt(deviceState, recentActions, lightSignals);
 
       // Debug: log prompt context and available tools
       console.log(`[AnalyzeHandler] recentActions.length=${recentActions.length}, tools=${tools?.map(t => t.name).join(',') ?? 'default'}`);
