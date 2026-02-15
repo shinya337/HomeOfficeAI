@@ -534,7 +534,8 @@ export function createApp(options?: CreateAppOptions): Express {
   // Security headers via Helmet
   app.use(
     helmet({
-      contentSecurityPolicy: false, // CSP is complex with inline scripts; configure separately if needed
+      contentSecurityPolicy: false,
+      crossOriginOpenerPolicy: false, // Firebase Google login requires popup communication
     })
   );
 
