@@ -40,18 +40,7 @@ Geminiが1つのFunction Callingツール（例: `break_mode`）を選択する�
 | `away_mode` | 離席検出 | 全デバイスOFF（節電） |
 | `wake_mode` | 居眠り検出 | 仮眠2分 → 全灯 + 覚醒BGM（2フェーズ制御） |
 
-### 3. 動的ツール生成
-
-ユーザーがセッション開始時に許可したデバイスに基づき、Geminiに渡すFunction Callingツールを**リクエスト毎に動的生成**。AIは許可された範囲内でのみ自律判断を行い、ユーザーの意図に反した制御を構造的に防止します。
-
-```mermaid
-flowchart LR
-    A["ユーザーが<br/>デバイス選択"] --> B["DynamicToolBuilder<br/>が許可ツールを生成"]
-    B --> C["Gemini に<br/>動的ツールセットを送信"]
-    C --> D["許可された範囲内で<br/>自律判断"]
-```
-
-### 4. マルチユーザー認証 + セキュアIoT連携
+### 3. マルチユーザー認証 + セキュアIoT連携
 
 Firebase Authentication（Googleログイン）でユーザーを認証し、IoTクレデンシャルを**AES-256-GCM暗号化**してFirestoreに保存。Alexa認証はブラウザ内リバースプロキシ方式でCookieを自動取得します。アカウント削除時にはCloud Functionsでデータを自動クリーンアップ。ゲストモードも用意されており、認証なしでも体験可能です。
 
@@ -68,7 +57,6 @@ flowchart TB
 
         subgraph Agent["エージェント層"]
             MonitorLoop["MonitorLoop<br/>（動的間隔制御）"]
-            DynTool["DynamicToolBuilder<br/>（動的ツール生成）"]
             Dispatcher["ActionDispatcher<br/>（オーケストレーション）"]
         end
 
@@ -92,8 +80,7 @@ flowchart TB
         Frontend -- "Camera Capture" --> Backend
         Backend --> MonitorLoop
         MonitorLoop --> VertexAI
-        VertexAI -- "Function Calling" --> DynTool
-        DynTool --> Dispatcher
+        VertexAI -- "Function Calling" --> Dispatcher
         Dispatcher --> Remo --> Light
         Dispatcher --> Alexa --> Echo
 
@@ -111,7 +98,7 @@ flowchart TB
 | **バックエンド** | TypeScript (strict) + Express.js | REST API・オーケストレーション制御 |
 | **認証** | Firebase Authentication | Googleログイン + ゲストモード |
 | **データベース** | Cloud Firestore | ユーザー別IoTクレデンシャル（AES-256-GCM暗号化） |
-| **IoT連携（照明/AC）** | Nature Remo Cloud API | 照明12モード・エアコン温度制御 |
+| **IoT連携（照明/AC）** | Nature Remo Cloud API | 照明ON/OFF・調光・色温度・カスタムシグナル・エアコン温度制御 |
 | **IoT連携（音声）** | alexa-remote2 | 音声読み上げ・BGM・ルーティン・天気/ニュース |
 | **サーバーレス** | Firebase Cloud Functions | 認証ライフサイクル管理 |
 | **インフラ** | Google Cloud Run | Docker マルチステージビルド |
@@ -122,9 +109,8 @@ flowchart TB
 |---|------|------|
 | 1 | **段階的確認による慎重な自律判断** | `continue_monitoring` による複数回の再分析で確信を得てから行動。単純なif-elseでも1回の即断でもない、エージェント固有の判断戦略 |
 | 2 | **オーケストレーション型の複合制御** | 1つのFunction Calling選択で照明→音声→BGMを時間差順次実行。空間全体を一括で遷移させる設計 |
-| 3 | **動的ツール生成とセッションスコープ権限** | 許可デバイスに基づきFunction Callingツールをリクエスト毎に動的生成。ユーザーの意図に反した制御を構造的に防止 |
-| 4 | **物理的介入による行動変容** | デジタル通知ではなく照明・温度・音楽・音声という物理的介入で行動変容を促進。`wake_mode` では仮眠→覚醒の2フェーズ時間制御を自動実行 |
-| 5 | **プライバシー配慮** | カメラ映像はVertex AI Geminiで分析後に即削除。Vertex AI経由のためモデル学習に使用されず、映像データはサーバーに一切保存されない |
+| 3 | **物理的介入による行動変容** | デジタル通知ではなく照明・温度・音楽・音声という物理的介入で行動変容を促進。`wake_mode` では仮眠→覚醒の2フェーズ時間制御を自動実行 |
+| 4 | **プライバシー配慮** | カメラ映像はVertex AI Geminiで分析後に即削除。Vertex AI経由のためモデル学習に使用されず、映像データはサーバーに一切保存されない |
 
 ## セットアップ
 
