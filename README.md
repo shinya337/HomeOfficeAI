@@ -6,8 +6,6 @@
 
 [![デモ動画](https://img.youtube.com/vi/EOxVVIZ_OTg/maxresdefault.jpg)](https://youtu.be/EOxVVIZ_OTg)
 
-🔗 **デプロイURL**: https://homeoffice-ai-675363481262.asia-northeast1.run.app
-
 ## 課題と解決策
 
 リモートワークは制度として普及したが、自宅は「働くために設計された空間」ではない。照明・空調・音環境がオフィスと異なるため集中が続かず、環境調整はユーザーの手動操作に依存している。
