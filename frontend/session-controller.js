@@ -497,9 +497,6 @@ export class SessionController {
       return this._config.defaultIntervalMs;
     }
 
-    // Debug: show captured image on screen
-    this._showDebugPreview(base64Image);
-
     try {
       console.log('[SessionController] Sending image for analysis...');
       const result = await apiClient.analyze(base64Image);
@@ -532,12 +529,7 @@ export class SessionController {
   _logAnalysisResult(result) {
     const { action, result: actionResult, nextIntervalMs, deviceState } = result;
 
-    console.log('[SessionController] Analysis result:', {
-      tool: action.tool,
-      params: action.params,
-      executed: actionResult?.executed,
-      message: actionResult?.message,
-    });
+    console.log(`[SessionController] Analysis: ${actionResult?.message ?? ''}`);
 
     // Log error details if present
     if (result.error) {
@@ -558,49 +550,6 @@ export class SessionController {
     const intervalText =
       intervalSeconds >= 60 ? `${intervalSeconds / 60} minutes` : `${intervalSeconds} seconds`;
     console.log(`[SessionController] Next analysis scheduled in ${intervalText}`);
-  }
-
-  /**
-   * Show debug preview of captured image (temporary)
-   * @param {string} base64Image - Base64 data URL
-   * @private
-   */
-  _showDebugPreview(base64Image) {
-    let container = document.getElementById('debugCapturePreview');
-    if (!container) {
-      container = document.createElement('div');
-      container.id = 'debugCapturePreview';
-      container.style.cssText =
-        'position:fixed;bottom:10px;right:10px;z-index:99999;' +
-        'background:rgba(0,0,0,0.85);padding:8px;border-radius:8px;' +
-        'color:#0f0;font-family:monospace;font-size:11px;max-width:340px;';
-
-      const label = document.createElement('div');
-      label.textContent = 'DEBUG: Last Capture';
-      label.style.marginBottom = '4px';
-      container.appendChild(label);
-
-      const img = document.createElement('img');
-      img.id = 'debugCaptureImg';
-      img.style.cssText = 'width:320px;border:1px solid #0f0;border-radius:4px;';
-      container.appendChild(img);
-
-      const info = document.createElement('div');
-      info.id = 'debugCaptureInfo';
-      info.style.marginTop = '4px';
-      container.appendChild(info);
-
-      document.body.appendChild(container);
-    }
-
-    const img = document.getElementById('debugCaptureImg');
-    const info = document.getElementById('debugCaptureInfo');
-    if (img) img.src = base64Image;
-    if (info) {
-      const sizeKB = Math.round((base64Image.length * 3) / 4 / 1024);
-      const time = new Date().toLocaleTimeString();
-      info.textContent = `${time} | ~${sizeKB}KB | ${this._videoElement?.videoWidth}x${this._videoElement?.videoHeight}`;
-    }
   }
 
   /**

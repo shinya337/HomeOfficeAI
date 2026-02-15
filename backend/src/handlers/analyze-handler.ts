@@ -17,6 +17,7 @@ import type {
   ImageData,
 } from '../types/api-types.js';
 import { ErrorCodes, Intervals, ToolNames } from '../types/api-types.js';
+import { sanitizeErrorMessage } from '../config/error-utils.js';
 
 /**
  * Dependencies for the analyze routes
@@ -209,7 +210,7 @@ export function createAnalyzeRoutes(deps: AnalyzeHandlerDependencies): Router {
       const errorResponse: ErrorResponse = {
         error: {
           code: 'INTERNAL_ERROR',
-          message: error instanceof Error ? error.message : 'Unknown error occurred',
+          message: sanitizeErrorMessage(error),
         },
       };
       res.status(500).json(errorResponse);

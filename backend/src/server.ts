@@ -1,5 +1,6 @@
 import express, { Express, Request, Response } from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
 import dotenv from 'dotenv';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -38,6 +39,7 @@ import { createPreferencesRoutes } from './handlers/preferences-handler.js';
 import { createPreferencesService, type PreferencesService } from './services/preferences-service.js';
 import { createEncryptionService } from './services/encryption-service.js';
 import { loadCredentialEncryptionKey } from './config/credential-env.js';
+import { sanitizeErrorMessage } from './config/error-utils.js';
 // Alexa Proxy Auth integration (Task 3.3, Requirements: 1.5, 5.3)
 import { createAlexaProxyRoutes } from './handlers/alexa-proxy-handler.js';
 import { createAlexaReverseProxyMiddleware } from './middleware/alexa-reverse-proxy.js';
@@ -250,7 +252,7 @@ export async function initAlexaService(): Promise<AlexaService | null> {
     );
     return sharedAlexaService;
   } catch (error) {
-    console.warn('[Server] Failed to initialize AlexaService:', error);
+    console.warn('[Server] Failed to initialize AlexaService:', error instanceof Error ? error.message : String(error));
     return null;
   }
 }
@@ -529,6 +531,13 @@ export interface CreateAppOptions {
 export function createApp(options?: CreateAppOptions): Express {
   const app = express();
 
+  // Security headers via Helmet
+  app.use(
+    helmet({
+      contentSecurityPolicy: false, // CSP is complex with inline scripts; configure separately if needed
+    })
+  );
+
   // CORS configuration - dynamically resolved from ALLOWED_ORIGINS env var
   // Requirements: 3.4, 3.5, 6.1, 6.2, 6.3, 6.4
   app.use(
@@ -614,7 +623,7 @@ export function createApp(options?: CreateAppOptions): Express {
           });
           return { ok: true as const, value: tempAlexaService };
         } catch (error) {
-          console.error('[Server] Failed to create AlexaService from cookie:', error);
+          console.error('[Server] Failed to create AlexaService from cookie:', error instanceof Error ? error.message : String(error));
           return { ok: false as const, error: { code: 'SERVICE_ERROR' as const, message: error instanceof Error ? error.message : 'Failed to create AlexaService' } };
         } finally {
           try {
@@ -688,7 +697,7 @@ export function createApp(options?: CreateAppOptions): Express {
       return await fetchAlexaDevicesFromCookie(alexaCookieResult.value, uid);
     } catch (error) {
       // Any unexpected error -> log and continue without Alexa devices (Req 3.4)
-      console.error(`[Server] User Alexa device fetch error for ${uid}:`, error);
+      console.error(`[Server] User Alexa device fetch error for ${uid}:`, error instanceof Error ? error.message : String(error));
       return [];
     }
   }
@@ -730,7 +739,7 @@ export function createApp(options?: CreateAppOptions): Express {
       console.error(`[Server] User AlexaService getDevices failed for ${uid}: ${devicesResult.error.message}`);
       return [];
     } catch (error) {
-      console.error(`[Server] Failed to create user AlexaService for ${uid}:`, error);
+      console.error(`[Server] Failed to create user AlexaService for ${uid}:`, error instanceof Error ? error.message : String(error));
       return [];
     } finally {
       // Clean up temp file
@@ -860,11 +869,11 @@ export function createApp(options?: CreateAppOptions): Express {
           // No global token and user has no saved token -> empty list
           res.json({ devices: [] });
         } catch (error) {
-          console.error('[Server] Device fetch error:', error);
+          console.error('[Server] Device fetch error:', error instanceof Error ? error.message : String(error));
           res.status(500).json({
             error: {
               code: 'INTERNAL_ERROR',
-              message: error instanceof Error ? error.message : 'Unknown error occurred',
+              message: sanitizeErrorMessage(error),
             },
           });
         }

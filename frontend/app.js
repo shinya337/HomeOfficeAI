@@ -295,10 +295,10 @@ async function beginSession() {
 
   let sessionId = null;
   try {
-    console.log('[HomeOffice.ai] セッション開始API呼び出し... devices:', allowedDeviceIds);
+    console.log('[HomeOffice.ai] セッション開始API呼び出し...');
     const sessionData = await apiStartSession(allowedDeviceIds, deviceToolOverrides);
     sessionId = sessionData.sessionId;
-    console.log('[HomeOffice.ai] セッション開始成功:', sessionId);
+    console.log('[HomeOffice.ai] セッション開始成功');
 
     // Alexaがない場合、Web Speech APIで開始挨拶
     if (!state.alexaSpeechEnabled) {
@@ -318,7 +318,7 @@ async function beginSession() {
         if (!state.isWorking) return;
         const toolName = result.action?.tool || 'unknown';
         const message = result.result?.message || result.actionResult?.message || '';
-        console.log('[HomeOffice.ai] 分析結果:', toolName, message);
+        console.log(`[HomeOffice.ai] 分析結果: ${message}`);
         addLog('focus', `AI: ${toolName}`);
         // モード表示を更新
         handleModeUpdate(result);

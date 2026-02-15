@@ -12,6 +12,7 @@
 import { Router, type Request, type Response } from 'express';
 import type { PreferencesService } from '../services/preferences-service.js';
 import type { AuthenticatedUser } from '../types/auth-types.js';
+import { sanitizeErrorMessage } from '../config/error-utils.js';
 
 // =============================================================================
 // Types
@@ -117,7 +118,7 @@ export function createPreferencesRoutes(
       res.status(500).json({
         error: 'INTERNAL_ERROR',
         message:
-          error instanceof Error ? error.message : 'サーバー内部エラーが発生しました。',
+          sanitizeErrorMessage(error),
       });
     }
   });
@@ -145,7 +146,7 @@ export function createPreferencesRoutes(
       res.status(500).json({
         error: 'INTERNAL_ERROR',
         message:
-          error instanceof Error ? error.message : 'サーバー内部エラーが発生しました。',
+          sanitizeErrorMessage(error),
       });
     }
   });

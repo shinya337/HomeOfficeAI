@@ -15,6 +15,7 @@
 import { Router, type Request, type Response } from 'express';
 import type { AlexaProxyService, AlexaProxyErrorCode } from '../types/alexa-proxy-types.js';
 import type { AuthenticatedUser } from '../types/auth-types.js';
+import { sanitizeErrorMessage } from '../config/error-utils.js';
 
 // =============================================================================
 // Types
@@ -102,7 +103,7 @@ export function createAlexaProxyRoutes(
       res.status(500).json({
         error: 'INTERNAL_ERROR',
         message:
-          error instanceof Error ? error.message : 'サーバー内部エラーが発生しました。',
+          sanitizeErrorMessage(error),
       });
     }
   });

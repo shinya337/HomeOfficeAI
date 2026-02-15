@@ -877,8 +877,7 @@ describe('SessionController', () => {
 
       // Verify analysis result is logged
       expect(consoleSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Analysis result'),
-        expect.anything()
+        expect.stringContaining('Analysis')
       );
     });
 
