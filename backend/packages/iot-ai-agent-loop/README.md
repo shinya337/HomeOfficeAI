@@ -100,7 +100,7 @@ npx tsx src/index.ts --image-dir ./test-images --light-id abc123 --aircon-id def
 | `GOOGLE_CLOUD_PROJECT` | Yes | - | Google Cloud プロジェクト ID |
 | `NATURE_REMO_TOKEN` | Yes | - | Nature Remo Cloud API トークン |
 | `VERTEX_AI_LOCATION` | No | `us-central1` | Vertex AI リージョン |
-| `GEMINI_MODEL` | No | `gemini-2.0-flash` | 使用する Gemini モデル名 |
+| `GEMINI_MODEL` | No | `gemini-2.5-flash` | 使用する Gemini モデル名 |
 
 ## アーキテクチャ
 

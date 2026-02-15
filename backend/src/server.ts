@@ -610,6 +610,43 @@ export function createApp(options?: CreateAppOptions): Express {
   const deviceCache = getDeviceCache();
   const sessionCredentialService = options?.credentialService ?? (firebaseServices !== null ? getOrCreateCredentialService(firebaseServices) : null);
 
+  // IoTServiceFactory: creates user-specific Nature Remo services from token
+  const iotServiceFactory = sessionCredentialService !== null
+    ? async (token: string): Promise<Result<import('./types/session-types.js').SessionIoTServices, { code: 'INVALID_TOKEN' | 'SERVICE_ERROR'; message: string }>> => {
+        try {
+          const rateLimitMonitor = createRateLimitMonitor();
+          const userNatureRemoClient = createNatureRemoClient(token, rateLimitMonitor);
+          const userLightService = createLightService(userNatureRemoClient);
+          const userAirconService = createAirconService(userNatureRemoClient);
+          const airconAdapter: import('./dispatcher/action-dispatcher.js').AirconService = {
+            async setTemperature(applianceId: string, temperature: number, mode?: string) {
+              const settings: { temperature?: string; operation_mode?: string } = {
+                temperature: String(temperature),
+              };
+              if (mode) {
+                settings.operation_mode = mode;
+              }
+              const result = await userAirconService.updateSettings(applianceId, settings);
+              if (result.success) {
+                return { success: true as const, data: { applianceId, temperature } };
+              }
+              return result;
+            },
+            async powerOff(applianceId: string) {
+              const result = await userAirconService.updateSettings(applianceId, { button: 'power-off' });
+              if (result.success) {
+                return { success: true as const, data: { applianceId } };
+              }
+              return result;
+            },
+          };
+          return { ok: true as const, value: { lightService: userLightService, airconService: airconAdapter, alexaService: undefined } };
+        } catch (error) {
+          return { ok: false as const, error: { code: 'SERVICE_ERROR' as const, message: error instanceof Error ? error.message : 'Failed to create IoT services' } };
+        }
+      }
+    : undefined;
+
   // AlexaServiceFactory: creates AlexaServiceForDispatcher from cookie JSON
   // Task 4.3, Requirements: 4.1, 4.4
   const alexaServiceFactory = sessionCredentialService !== null
@@ -642,6 +679,7 @@ export function createApp(options?: CreateAppOptions): Express {
     sessionManager,
     getCachedDevices: () => deviceCache.get(),
     ...(sessionCredentialService !== null ? { credentialService: sessionCredentialService } : {}),
+    ...(iotServiceFactory !== undefined ? { iotServiceFactory } : {}),
     ...(alexaServiceFactory !== undefined ? { alexaServiceFactory } : {}),
   }));
 

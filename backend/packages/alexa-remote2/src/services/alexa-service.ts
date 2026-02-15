@@ -288,9 +288,8 @@ export async function createAlexaService(
   await new Promise<void>((resolve) => {
     alexa.init(initOptions, (err?: Error) => {
       if (err) {
-        // Init failed - service will be in disconnected state
-        // This is expected for proxy mode or expired cookies
-        connected = false;
+        // cookieイベントで既に接続成功している場合は維持
+        // (proxy mode ではinit errorが発生するがcookie経由で接続済み)
       } else {
         connected = true;
       }

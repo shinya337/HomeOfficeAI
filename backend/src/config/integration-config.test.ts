@@ -94,7 +94,7 @@ describe('loadIntegrationConfig', () => {
       expect(result.ok).toBe(true);
       if (result.ok) {
         expect(result.value.agentConfig.location).toBe('us-central1');
-        expect(result.value.agentConfig.model).toBe('gemini-2.0-flash');
+        expect(result.value.agentConfig.model).toBe('gemini-2.5-flash');
       }
     });
 

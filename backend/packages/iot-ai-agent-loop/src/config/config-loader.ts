@@ -53,7 +53,7 @@ export type Result<T, E> =
 const DEFAULT_LOCATION = 'us-central1';
 
 /** Default Gemini model name */
-const DEFAULT_MODEL = 'gemini-2.0-flash';
+const DEFAULT_MODEL = 'gemini-2.5-flash';
 
 // =============================================================================
 // Implementation
@@ -68,7 +68,7 @@ const DEFAULT_MODEL = 'gemini-2.0-flash';
  *
  * オプション環境変数:
  * - VERTEX_AI_LOCATION (デフォルト: us-central1): Vertex AI リージョン
- * - GEMINI_MODEL (デフォルト: gemini-2.0-flash): Gemini モデル名
+ * - GEMINI_MODEL (デフォルト: gemini-2.5-flash): Gemini モデル名
  *
  * @returns Result<AgentConfig, AgentConfigError>
  */

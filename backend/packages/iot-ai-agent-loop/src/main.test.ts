@@ -221,7 +221,7 @@ describe('main - initializeApp', () => {
       value: {
         projectId: 'test-project',
         location: 'us-central1',
-        model: 'gemini-2.0-flash',
+        model: 'gemini-2.5-flash',
         natureRemoToken: 'test-token',
       },
     });
@@ -248,7 +248,7 @@ describe('main - initializeApp', () => {
       value: {
         projectId: 'test-project',
         location: 'us-central1',
-        model: 'gemini-2.0-flash',
+        model: 'gemini-2.5-flash',
         natureRemoToken: 'test-token',
       },
     });
@@ -268,7 +268,7 @@ describe('main - initializeApp', () => {
     expect(createAgentClient).toHaveBeenCalledWith({
       projectId: 'test-project',
       location: 'us-central1',
-      model: 'gemini-2.0-flash',
+      model: 'gemini-2.5-flash',
     });
     expect(createActionDispatcher).toHaveBeenCalled();
     expect(createMonitorLoop).toHaveBeenCalled();
@@ -284,7 +284,7 @@ describe('main - initializeApp', () => {
       value: {
         projectId: 'test-project',
         location: 'us-central1',
-        model: 'gemini-2.0-flash',
+        model: 'gemini-2.5-flash',
         natureRemoToken: 'test-token',
       },
     });
@@ -320,7 +320,7 @@ describe('main - initializeApp', () => {
       value: {
         projectId: 'test-project',
         location: 'us-central1',
-        model: 'gemini-2.0-flash',
+        model: 'gemini-2.5-flash',
         natureRemoToken: 'test-token',
       },
     });
@@ -344,7 +344,7 @@ describe('main - initializeApp', () => {
       value: {
         projectId: 'test-project',
         location: 'us-central1',
-        model: 'gemini-2.0-flash',
+        model: 'gemini-2.5-flash',
         natureRemoToken: 'test-token',
       },
     });
@@ -383,7 +383,7 @@ describe('main - initializeApp', () => {
       value: {
         projectId: 'test-project',
         location: 'us-central1',
-        model: 'gemini-2.0-flash',
+        model: 'gemini-2.5-flash',
         natureRemoToken: 'test-token',
       },
     });
@@ -413,7 +413,7 @@ describe('main - initializeApp', () => {
       value: {
         projectId: 'test-project',
         location: 'us-central1',
-        model: 'gemini-2.0-flash',
+        model: 'gemini-2.5-flash',
         natureRemoToken: 'test-token',
       },
     });
@@ -444,7 +444,7 @@ describe('main - initializeApp', () => {
       value: {
         projectId: 'test-project',
         location: 'us-central1',
-        model: 'gemini-2.0-flash',
+        model: 'gemini-2.5-flash',
         natureRemoToken: 'test-token',
       },
     });
@@ -474,7 +474,7 @@ describe('main - initializeApp', () => {
       value: {
         projectId: 'test-project',
         location: 'us-central1',
-        model: 'gemini-2.0-flash',
+        model: 'gemini-2.5-flash',
         natureRemoToken: 'test-token',
       },
     });
@@ -504,7 +504,7 @@ describe('main - initializeApp', () => {
       value: {
         projectId: 'test-project',
         location: 'us-central1',
-        model: 'gemini-2.0-flash',
+        model: 'gemini-2.5-flash',
         natureRemoToken: 'test-token',
       },
     });
@@ -518,7 +518,7 @@ describe('main - initializeApp', () => {
     // 起動ログの確認
     const logCalls = mockConsoleLog.mock.calls.map(c => String(c[0]));
     expect(logCalls.some(msg => msg.includes('test-project'))).toBe(true);
-    expect(logCalls.some(msg => msg.includes('gemini-2.0-flash'))).toBe(true);
+    expect(logCalls.some(msg => msg.includes('gemini-2.5-flash'))).toBe(true);
     expect(logCalls.some(msg => msg.includes('3'))).toBe(true);
   });
 });
