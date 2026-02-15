@@ -329,8 +329,9 @@ describe('E2E Integration: Alexa Session Integration', () => {
       await dispatcher.dispatch({ tool: 'alexa_routine', params: { routine_name: 'morning' } });
 
       // All should use session-specific, none should use global
+      // announce is called 2 times: once by session start auto-announcement + once by dispatch
       expect(sessionAlexaService.speak).toHaveBeenCalledTimes(1);
-      expect(sessionAlexaService.announce).toHaveBeenCalledTimes(1);
+      expect(sessionAlexaService.announce).toHaveBeenCalledTimes(2);
       expect(sessionAlexaService.setVolume).toHaveBeenCalledTimes(1);
       expect(sessionAlexaService.executeRoutine).toHaveBeenCalledTimes(1);
 

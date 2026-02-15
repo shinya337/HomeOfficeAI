@@ -1884,7 +1884,7 @@ describe('ActionDispatcher - Alexa Cases Comprehensive (Task 4.3)', () => {
 });
 
 // =============================================================================
-// ActionDispatcher - break_mode Tests
+// ActionDispatcher - break_mode Tests (Dynamic Signal Resolution)
 // =============================================================================
 
 function createMockLightService(): LightService {
@@ -1895,15 +1895,16 @@ function createMockLightService(): LightService {
 }
 
 describe('ActionDispatcher - break_mode', () => {
-  const allDevices: readonly AllowedDevice[] = [
-    { id: 'test-light-id', type: 'LIGHT' },
+  // Backward-compatible: devices with '安らぎ' signal (Req 5.1)
+  const devicesWithYasuragi: readonly AllowedDevice[] = [
+    { id: 'test-light-id', type: 'LIGHT', signals: ['安らぎ', '読書', '家事', '通常'] },
     { id: 'test-alexa-id', type: 'ALEXA' },
   ];
 
   beforeEach(() => { vi.useFakeTimers(); });
   afterEach(() => { vi.useRealTimers(); });
 
-  it('should execute all 3 sub-actions when light and alexa are available', async () => {
+  it('should use resolveRelaxSignal to find relax signal and call sendNamedSignal (Req 3.1, 5.1)', async () => {
     const mockLight = createMockLightService();
     const mockAlexa = createMockAlexaService();
     vi.mocked(mockLight.sendNamedSignal).mockResolvedValue({
@@ -1919,7 +1920,7 @@ describe('ActionDispatcher - break_mode', () => {
       data: { deviceSerialNumber: 'test-alexa-id', command: 'textcommand', success: true },
     });
 
-    const dispatcher = createActionDispatcher(allDevices, {
+    const dispatcher = createActionDispatcher(devicesWithYasuragi, {
       lightService: mockLight,
       alexaService: mockAlexa,
     });
@@ -1939,12 +1940,122 @@ describe('ActionDispatcher - break_mode', () => {
       expect(result.value.nextInterval).toBe('normal');
       expect(result.value.message).toBe('食事中を検出');
     }
+    // Should dynamically resolve '安らぎ' from signals via resolveRelaxSignal
     expect(mockLight.sendNamedSignal).toHaveBeenCalledWith('test-light-id', '安らぎ');
     expect(mockAlexa.speak).toHaveBeenCalledWith('test-alexa-id', '休憩モードに切り替えます。ごゆっくりどうぞ。');
     expect(mockAlexa.textCommand).toHaveBeenCalledWith('test-alexa-id', 'リラックスの音楽をかけて');
   });
 
-  it('should execute only alexa sub-actions when no light device', async () => {
+  it('should fallback to control(on-favorite) when no relax signal found (Req 3.2)', async () => {
+    const mockLight = createMockLightService();
+    vi.mocked(mockLight.control).mockResolvedValue({
+      success: true,
+      data: { applianceId: 'test-light-id', power: 'on' },
+    });
+
+    // Device with no relax-matching signals
+    const devicesNoRelax: readonly AllowedDevice[] = [
+      { id: 'test-light-id', type: 'LIGHT', signals: ['読書', '家事'] },
+    ];
+    const dispatcher = createActionDispatcher(devicesNoRelax, {
+      lightService: mockLight,
+    });
+
+    const action: AgentAction = {
+      tool: 'break_mode',
+      params: { reason: '休憩中' },
+    };
+
+    const result = await dispatcher.dispatch(action);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.executed).toBe(true);
+    }
+    // Should fallback to on-favorite standard button
+    expect(mockLight.control).toHaveBeenCalledWith('test-light-id', 'on-favorite');
+    expect(mockLight.sendNamedSignal).not.toHaveBeenCalled();
+  });
+
+  it('should fallback to control(on-favorite) when signals is empty (Req 3.2)', async () => {
+    const mockLight = createMockLightService();
+    vi.mocked(mockLight.control).mockResolvedValue({
+      success: true,
+      data: { applianceId: 'test-light-id', power: 'on' },
+    });
+
+    const devicesEmptySignals: readonly AllowedDevice[] = [
+      { id: 'test-light-id', type: 'LIGHT', signals: [] },
+    ];
+    const dispatcher = createActionDispatcher(devicesEmptySignals, {
+      lightService: mockLight,
+    });
+
+    const action: AgentAction = {
+      tool: 'break_mode',
+      params: { reason: '休憩中' },
+    };
+
+    const result = await dispatcher.dispatch(action);
+
+    expect(result.ok).toBe(true);
+    expect(mockLight.control).toHaveBeenCalledWith('test-light-id', 'on-favorite');
+    expect(mockLight.sendNamedSignal).not.toHaveBeenCalled();
+  });
+
+  it('should fallback to control(on-favorite) when signals is undefined (Req 3.2)', async () => {
+    const mockLight = createMockLightService();
+    vi.mocked(mockLight.control).mockResolvedValue({
+      success: true,
+      data: { applianceId: 'test-light-id', power: 'on' },
+    });
+
+    // No signals field at all (backward compat with old AllowedDevice)
+    const devicesNoSignals: readonly AllowedDevice[] = [
+      { id: 'test-light-id', type: 'LIGHT' },
+    ];
+    const dispatcher = createActionDispatcher(devicesNoSignals, {
+      lightService: mockLight,
+    });
+
+    const action: AgentAction = {
+      tool: 'break_mode',
+      params: { reason: '休憩中' },
+    };
+
+    const result = await dispatcher.dispatch(action);
+
+    expect(result.ok).toBe(true);
+    expect(mockLight.control).toHaveBeenCalledWith('test-light-id', 'on-favorite');
+    expect(mockLight.sendNamedSignal).not.toHaveBeenCalled();
+  });
+
+  it('should resolve alternative relax keyword (くつろぎ) dynamically (Req 3.1)', async () => {
+    const mockLight = createMockLightService();
+    vi.mocked(mockLight.sendNamedSignal).mockResolvedValue({
+      success: true,
+      data: { applianceId: 'test-light-id', signalName: 'くつろぎ', success: true },
+    });
+
+    const devicesKutsurogi: readonly AllowedDevice[] = [
+      { id: 'test-light-id', type: 'LIGHT', signals: ['くつろぎ', '明るい'] },
+    ];
+    const dispatcher = createActionDispatcher(devicesKutsurogi, {
+      lightService: mockLight,
+    });
+
+    const action: AgentAction = {
+      tool: 'break_mode',
+      params: { reason: '休憩中' },
+    };
+
+    const result = await dispatcher.dispatch(action);
+
+    expect(result.ok).toBe(true);
+    expect(mockLight.sendNamedSignal).toHaveBeenCalledWith('test-light-id', 'くつろぎ');
+  });
+
+  it('should execute only alexa sub-actions when no light device (Req 3.5)', async () => {
     const mockAlexa = createMockAlexaService();
     vi.mocked(mockAlexa.speak).mockResolvedValue({
       success: true,
@@ -1978,35 +2089,6 @@ describe('ActionDispatcher - break_mode', () => {
     }
     expect(mockAlexa.speak).toHaveBeenCalled();
     expect(mockAlexa.textCommand).toHaveBeenCalled();
-  });
-
-  it('should execute only light sub-action when no alexa device', async () => {
-    const mockLight = createMockLightService();
-    vi.mocked(mockLight.sendNamedSignal).mockResolvedValue({
-      success: true,
-      data: { applianceId: 'test-light-id', signalName: '安らぎ', success: true },
-    });
-
-    const lightOnlyDevices: readonly AllowedDevice[] = [
-      { id: 'test-light-id', type: 'LIGHT' },
-    ];
-    const dispatcher = createActionDispatcher(lightOnlyDevices, {
-      lightService: mockLight,
-    });
-
-    const action: AgentAction = {
-      tool: 'break_mode',
-      params: { reason: '休憩中' },
-    };
-
-    const result = await dispatcher.dispatch(action);
-
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.value.executed).toBe(true);
-      expect(result.value.message).toBe('休憩中');
-    }
-    expect(mockLight.sendNamedSignal).toHaveBeenCalledWith('test-light-id', '安らぎ');
   });
 
   it('should return success with reason message when no devices available', async () => {
@@ -2060,7 +2142,7 @@ describe('ActionDispatcher - break_mode', () => {
       data: { deviceSerialNumber: 'test-alexa-id', command: 'textcommand', success: true },
     });
 
-    const dispatcher = createActionDispatcher(allDevices, {
+    const dispatcher = createActionDispatcher(devicesWithYasuragi, {
       lightService: mockLight,
       alexaService: mockAlexa,
     });
@@ -2098,7 +2180,7 @@ describe('ActionDispatcher - break_mode', () => {
       data: { deviceSerialNumber: 'test-alexa-id', command: 'textcommand', success: true },
     });
 
-    const dispatcher = createActionDispatcher(allDevices, {
+    const dispatcher = createActionDispatcher(devicesWithYasuragi, {
       lightService: mockLight,
       alexaService: mockAlexa,
     });
@@ -2124,19 +2206,20 @@ describe('ActionDispatcher - break_mode', () => {
 });
 
 // =============================================================================
-// ActionDispatcher - focus_mode Tests
+// ActionDispatcher - focus_mode Tests (Dynamic Signal Resolution)
 // =============================================================================
 
 describe('ActionDispatcher - focus_mode', () => {
-  const allDevices: readonly AllowedDevice[] = [
-    { id: 'test-light-id', type: 'LIGHT' },
+  // Backward-compatible: devices with '通常' signal (Req 5.2)
+  const devicesWithTsujou: readonly AllowedDevice[] = [
+    { id: 'test-light-id', type: 'LIGHT', signals: ['安らぎ', '読書', '家事', '通常'] },
     { id: 'test-alexa-id', type: 'ALEXA' },
   ];
 
   beforeEach(() => { vi.useFakeTimers(); });
   afterEach(() => { vi.useRealTimers(); });
 
-  it('should execute all 3 sub-actions when light and alexa are available', async () => {
+  it('should use resolveNormalSignal to find normal signal and call sendNamedSignal (Req 3.3, 5.2)', async () => {
     const mockLight = createMockLightService();
     const mockAlexa = createMockAlexaService();
     vi.mocked(mockLight.sendNamedSignal).mockResolvedValue({
@@ -2152,7 +2235,7 @@ describe('ActionDispatcher - focus_mode', () => {
       data: { deviceSerialNumber: 'test-alexa-id', command: 'textcommand', success: true },
     });
 
-    const dispatcher = createActionDispatcher(allDevices, {
+    const dispatcher = createActionDispatcher(devicesWithTsujou, {
       lightService: mockLight,
       alexaService: mockAlexa,
     });
@@ -2172,12 +2255,118 @@ describe('ActionDispatcher - focus_mode', () => {
       expect(result.value.nextInterval).toBe('normal');
       expect(result.value.message).toBe('作業開始を検出');
     }
+    // Should dynamically resolve '通常' from signals via resolveNormalSignal
     expect(mockLight.sendNamedSignal).toHaveBeenCalledWith('test-light-id', '通常');
     expect(mockAlexa.speak).toHaveBeenCalledWith('test-alexa-id', '集中モードに切り替えます。');
     expect(mockAlexa.textCommand).toHaveBeenCalledWith('test-alexa-id', '集中できるジャズをかけて');
   });
 
-  it('should execute only alexa sub-actions when no light device', async () => {
+  it('should fallback to control(on-100) when no normal signal found (Req 3.4)', async () => {
+    const mockLight = createMockLightService();
+    vi.mocked(mockLight.control).mockResolvedValue({
+      success: true,
+      data: { applianceId: 'test-light-id', power: 'on' },
+    });
+
+    // Device with no normal-matching signals
+    const devicesNoNormal: readonly AllowedDevice[] = [
+      { id: 'test-light-id', type: 'LIGHT', signals: ['安らぎ', '読書'] },
+    ];
+    const dispatcher = createActionDispatcher(devicesNoNormal, {
+      lightService: mockLight,
+    });
+
+    const action: AgentAction = {
+      tool: 'focus_mode',
+      params: { reason: '作業開始' },
+    };
+
+    const result = await dispatcher.dispatch(action);
+
+    expect(result.ok).toBe(true);
+    // Should fallback to on-100 standard button
+    expect(mockLight.control).toHaveBeenCalledWith('test-light-id', 'on-100');
+    expect(mockLight.sendNamedSignal).not.toHaveBeenCalled();
+  });
+
+  it('should fallback to control(on-100) when signals is empty (Req 3.4)', async () => {
+    const mockLight = createMockLightService();
+    vi.mocked(mockLight.control).mockResolvedValue({
+      success: true,
+      data: { applianceId: 'test-light-id', power: 'on' },
+    });
+
+    const devicesEmptySignals: readonly AllowedDevice[] = [
+      { id: 'test-light-id', type: 'LIGHT', signals: [] },
+    ];
+    const dispatcher = createActionDispatcher(devicesEmptySignals, {
+      lightService: mockLight,
+    });
+
+    const action: AgentAction = {
+      tool: 'focus_mode',
+      params: { reason: '作業開始' },
+    };
+
+    const result = await dispatcher.dispatch(action);
+
+    expect(result.ok).toBe(true);
+    expect(mockLight.control).toHaveBeenCalledWith('test-light-id', 'on-100');
+    expect(mockLight.sendNamedSignal).not.toHaveBeenCalled();
+  });
+
+  it('should fallback to control(on-100) when signals is undefined (Req 3.4)', async () => {
+    const mockLight = createMockLightService();
+    vi.mocked(mockLight.control).mockResolvedValue({
+      success: true,
+      data: { applianceId: 'test-light-id', power: 'on' },
+    });
+
+    const devicesNoSignals: readonly AllowedDevice[] = [
+      { id: 'test-light-id', type: 'LIGHT' },
+    ];
+    const dispatcher = createActionDispatcher(devicesNoSignals, {
+      lightService: mockLight,
+    });
+
+    const action: AgentAction = {
+      tool: 'focus_mode',
+      params: { reason: '作業開始' },
+    };
+
+    const result = await dispatcher.dispatch(action);
+
+    expect(result.ok).toBe(true);
+    expect(mockLight.control).toHaveBeenCalledWith('test-light-id', 'on-100');
+    expect(mockLight.sendNamedSignal).not.toHaveBeenCalled();
+  });
+
+  it('should resolve alternative normal keyword (標準) dynamically (Req 3.3)', async () => {
+    const mockLight = createMockLightService();
+    vi.mocked(mockLight.sendNamedSignal).mockResolvedValue({
+      success: true,
+      data: { applianceId: 'test-light-id', signalName: '標準モード', success: true },
+    });
+
+    const devicesHyoujun: readonly AllowedDevice[] = [
+      { id: 'test-light-id', type: 'LIGHT', signals: ['標準モード', 'おやすみ'] },
+    ];
+    const dispatcher = createActionDispatcher(devicesHyoujun, {
+      lightService: mockLight,
+    });
+
+    const action: AgentAction = {
+      tool: 'focus_mode',
+      params: { reason: '作業開始' },
+    };
+
+    const result = await dispatcher.dispatch(action);
+
+    expect(result.ok).toBe(true);
+    expect(mockLight.sendNamedSignal).toHaveBeenCalledWith('test-light-id', '標準モード');
+  });
+
+  it('should execute only alexa sub-actions when no light device (Req 3.5)', async () => {
     const mockAlexa = createMockAlexaService();
     vi.mocked(mockAlexa.speak).mockResolvedValue({
       success: true,
@@ -2247,7 +2436,7 @@ describe('ActionDispatcher - focus_mode', () => {
       data: { deviceSerialNumber: 'test-alexa-id', command: 'textcommand', success: true },
     });
 
-    const dispatcher = createActionDispatcher(allDevices, {
+    const dispatcher = createActionDispatcher(devicesWithTsujou, {
       lightService: mockLight,
       alexaService: mockAlexa,
     });
@@ -2268,6 +2457,67 @@ describe('ActionDispatcher - focus_mode', () => {
     }
     expect(mockAlexa.speak).toHaveBeenCalled();
     expect(mockAlexa.textCommand).toHaveBeenCalled();
+  });
+});
+
+// =============================================================================
+// ActionDispatcher - light_control Dynamic Label Tests
+// =============================================================================
+
+describe('ActionDispatcher - light_control dynamic label', () => {
+  it('should use signalToLabel for custom signal actions in message (Req 5.3)', async () => {
+    const mockLight = createMockLightService();
+    vi.mocked(mockLight.sendNamedSignal).mockResolvedValue({
+      success: true,
+      data: { applianceId: 'test-light-id', signalName: 'カスタム照明', success: true },
+    });
+
+    const devicesWithSignals: readonly AllowedDevice[] = [
+      { id: 'test-light-id', type: 'LIGHT', signals: ['カスタム照明'] },
+    ];
+    const dispatcher = createActionDispatcher(devicesWithSignals, {
+      lightService: mockLight,
+    });
+
+    const action: AgentAction = {
+      tool: 'light_control',
+      params: { action: 'カスタム照明' },
+    };
+
+    const result = await dispatcher.dispatch(action);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // signalToLabel generates "{name}モード" format
+      expect(result.value.message).toContain('カスタム照明モード');
+    }
+  });
+
+  it('should still use static label for standard buttons', async () => {
+    const mockLight = createMockLightService();
+    vi.mocked(mockLight.control).mockResolvedValue({
+      success: true,
+      data: { applianceId: 'test-light-id', power: 'on' },
+    });
+
+    const devices: readonly AllowedDevice[] = [
+      { id: 'test-light-id', type: 'LIGHT' },
+    ];
+    const dispatcher = createActionDispatcher(devices, {
+      lightService: mockLight,
+    });
+
+    const action: AgentAction = {
+      tool: 'light_control',
+      params: { action: 'on-100' },
+    };
+
+    const result = await dispatcher.dispatch(action);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.message).toContain('全灯');
+    }
   });
 });
 

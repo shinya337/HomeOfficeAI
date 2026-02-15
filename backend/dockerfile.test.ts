@@ -66,36 +66,12 @@ describe('Dockerfile', () => {
     expect(content).toMatch(/PORT/);
   });
 
-  it('フロントエンドビルドステージにFirebase環境変数のARGを定義する', () => {
+  it('フロントエンドビルドステージで.env.productionからFirebase設定を読む', () => {
     const content = readFileSync(DOCKERFILE_PATH, 'utf-8');
-    // frontend-buildステージ内にARGが定義されている
+    // frontend-buildステージでソースをコピーし、npm run buildで.env.productionを参照
     const frontendStage = content.split(/FROM\s+node:20[^\n]*AS\s+backend-build/)[0] ?? '';
-    expect(frontendStage).toMatch(/ARG\s+VITE_FIREBASE_API_KEY/);
-    expect(frontendStage).toMatch(/ARG\s+VITE_FIREBASE_AUTH_DOMAIN/);
-    expect(frontendStage).toMatch(/ARG\s+VITE_FIREBASE_PROJECT_ID/);
-  });
-
-  it('ARGをENVに変換してViteビルドで参照可能にする', () => {
-    const content = readFileSync(DOCKERFILE_PATH, 'utf-8');
-    // frontend-buildステージ内でARGをENVに変換している
-    const frontendStage = content.split(/FROM\s+node:20[^\n]*AS\s+backend-build/)[0] ?? '';
-    expect(frontendStage).toMatch(/ENV\s+VITE_FIREBASE_API_KEY[=\s]/);
-    expect(frontendStage).toMatch(/ENV\s+VITE_FIREBASE_AUTH_DOMAIN[=\s]/);
-    expect(frontendStage).toMatch(/ENV\s+VITE_FIREBASE_PROJECT_ID[=\s]/);
-  });
-
-  it('Firebase ARGはnpm run buildより前に定義されている', () => {
-    const content = readFileSync(DOCKERFILE_PATH, 'utf-8');
-    // frontend-buildステージ内で、ARG/ENVがRUN npm run buildより前にある
-    const frontendStage = content.split(/FROM\s+node:20[^\n]*AS\s+backend-build/)[0] ?? '';
-    const argPos = frontendStage.indexOf('ARG VITE_FIREBASE_API_KEY');
-    const envPos = frontendStage.indexOf('ENV VITE_FIREBASE_API_KEY');
-    const buildPos = frontendStage.indexOf('npm run build');
-    expect(argPos).toBeGreaterThan(-1);
-    expect(envPos).toBeGreaterThan(-1);
-    expect(buildPos).toBeGreaterThan(-1);
-    expect(argPos).toBeLessThan(buildPos);
-    expect(envPos).toBeLessThan(buildPos);
+    expect(frontendStage).toMatch(/COPY\s+frontend\/\s+\.\//);
+    expect(frontendStage).toMatch(/npm run build/);
   });
 
   it('フロントエンドビルド成果物をfrontend-distにコピーする', () => {

@@ -853,4 +853,134 @@ describe('AnalyzeHandlerService', () => {
       );
     });
   });
+
+  describe('Light signal propagation to buildPrompt (Task 4.1)', () => {
+    let dynamicToolBuilder: DynamicToolBuilderService;
+
+    beforeEach(() => {
+      dynamicToolBuilder = createMockDynamicToolBuilder([]);
+    });
+
+    it('should pass lightSignals to buildPrompt when LIGHT device has signals', async () => {
+      const allowedDevices: AllowedDevice[] = [
+        { id: 'light-001', type: 'LIGHT', signals: ['安らぎ', '通常', '読書'] },
+        { id: 'aircon-001', type: 'AC' },
+      ];
+      sessionManager.startSession(null, allowedDevices);
+
+      const deps: AnalyzeHandlerDependencies = {
+        sessionManager,
+        agentClient,
+        actionDispatcherFactory,
+        deviceStateService,
+        dynamicToolBuilder,
+      };
+      analyzeHandler = createAnalyzeHandler(deps);
+
+      await analyzeHandler.analyze(TEST_IMAGE);
+
+      // Prompt should contain dynamic signal references from the user's LIGHT device
+      const analyzeCall = vi.mocked(agentClient.analyze).mock.calls[0];
+      const prompt = analyzeCall[1] as string;
+      // With '安らぎ' signal, break mode section should reference it dynamically
+      expect(prompt).toContain('安らぎモード');
+      // With '通常' signal, focus mode section should reference it dynamically
+      expect(prompt).toContain('通常モード');
+    });
+
+    it('should use fallback prompt when LIGHT device has no signals (empty array)', async () => {
+      const allowedDevices: AllowedDevice[] = [
+        { id: 'light-001', type: 'LIGHT', signals: [] },
+        { id: 'aircon-001', type: 'AC' },
+      ];
+      sessionManager.startSession(null, allowedDevices);
+
+      const deps: AnalyzeHandlerDependencies = {
+        sessionManager,
+        agentClient,
+        actionDispatcherFactory,
+        deviceStateService,
+        dynamicToolBuilder,
+      };
+      analyzeHandler = createAnalyzeHandler(deps);
+
+      await analyzeHandler.analyze(TEST_IMAGE);
+
+      const analyzeCall = vi.mocked(agentClient.analyze).mock.calls[0];
+      const prompt = analyzeCall[1] as string;
+      // Without signals, prompt should use standard fallback descriptions
+      expect(prompt).toContain('お気に入りモード');
+      expect(prompt).toContain('全灯（on-100）');
+    });
+
+    it('should use fallback prompt when no LIGHT device in session', async () => {
+      const allowedDevices: AllowedDevice[] = [
+        { id: 'aircon-001', type: 'AC' },
+      ];
+      sessionManager.startSession(null, allowedDevices);
+
+      const deps: AnalyzeHandlerDependencies = {
+        sessionManager,
+        agentClient,
+        actionDispatcherFactory,
+        deviceStateService,
+        dynamicToolBuilder,
+      };
+      analyzeHandler = createAnalyzeHandler(deps);
+
+      await analyzeHandler.analyze(TEST_IMAGE);
+
+      const analyzeCall = vi.mocked(agentClient.analyze).mock.calls[0];
+      const prompt = analyzeCall[1] as string;
+      // Without LIGHT device, prompt should use standard fallback descriptions
+      expect(prompt).toContain('お気に入りモード');
+      expect(prompt).toContain('全灯（on-100）');
+    });
+
+    it('should use fallback prompt when allowedDevices is undefined (backward compat)', async () => {
+      sessionManager.startSession(null); // No allowedDevices
+
+      const deps: AnalyzeHandlerDependencies = {
+        sessionManager,
+        agentClient,
+        actionDispatcherFactory,
+        deviceStateService,
+        dynamicToolBuilder,
+      };
+      analyzeHandler = createAnalyzeHandler(deps);
+
+      await analyzeHandler.analyze(TEST_IMAGE);
+
+      const analyzeCall = vi.mocked(agentClient.analyze).mock.calls[0];
+      const prompt = analyzeCall[1] as string;
+      // Without allowedDevices, prompt should use standard fallback descriptions
+      expect(prompt).toContain('お気に入りモード');
+      expect(prompt).toContain('全灯（on-100）');
+    });
+
+    it('should pass lightSignals to buildPrompt when using sessionId (Task 6.3)', async () => {
+      const allowedDevices: AllowedDevice[] = [
+        { id: 'light-001', type: 'LIGHT', signals: ['くつろぎ', '標準'] },
+      ];
+      const session = sessionManager.startSession(null, allowedDevices);
+
+      const deps: AnalyzeHandlerDependencies = {
+        sessionManager,
+        agentClient,
+        actionDispatcherFactory,
+        deviceStateService,
+        dynamicToolBuilder,
+      };
+      analyzeHandler = createAnalyzeHandler(deps);
+
+      await analyzeHandler.analyze(TEST_IMAGE, session.sessionId);
+
+      const analyzeCall = vi.mocked(agentClient.analyze).mock.calls[0];
+      const prompt = analyzeCall[1] as string;
+      // With 'くつろぎ' signal (relax keyword), break mode should reference it
+      expect(prompt).toContain('くつろぎモード');
+      // With '標準' signal (normal keyword), focus mode should reference it
+      expect(prompt).toContain('標準モード');
+    });
+  });
 });

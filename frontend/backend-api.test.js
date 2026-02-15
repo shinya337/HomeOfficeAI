@@ -321,6 +321,7 @@ describe('API Client Module', () => {
             mimeType: 'image/jpeg',
           },
         }),
+        signal: expect.any(AbortSignal),
       });
       expect(result).toEqual(mockResponse);
     });
@@ -351,6 +352,7 @@ describe('API Client Module', () => {
             mimeType: 'image/png',
           },
         }),
+        signal: expect.any(AbortSignal),
       });
     });
 
@@ -381,6 +383,7 @@ describe('API Client Module', () => {
             mimeType: 'image/jpeg',
           },
         }),
+        signal: expect.any(AbortSignal),
       });
     });
 
@@ -440,6 +443,104 @@ describe('API Client Module', () => {
       expect(error).toBeInstanceOf(ApiError);
       expect(error.code).toBe('AI_ERROR');
       expect(error.status).toBe(500);
+    });
+
+    it('should pass AbortSignal to fetch for timeout control', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            success: true,
+            action: { tool: 'do_nothing', params: {} },
+            result: { executed: false, message: 'ok' },
+            nextIntervalMs: 30000,
+          }),
+      });
+
+      await analyze('data:image/jpeg;base64,test');
+
+      const [, options] = mockFetch.mock.calls[0];
+      expect(options.signal).toBeInstanceOf(AbortSignal);
+    });
+
+    it('should retry once on network error and succeed', async () => {
+      vi.useFakeTimers();
+
+      const successResponse = {
+        success: true,
+        action: { tool: 'do_nothing', params: {} },
+        result: { executed: false, message: 'ok' },
+        nextIntervalMs: 30000,
+      };
+
+      mockFetch
+        .mockRejectedValueOnce(new Error('Network error'))
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve(successResponse),
+        });
+
+      const promise = analyze('data:image/jpeg;base64,test');
+      await vi.advanceTimersByTimeAsync(2000);
+      const result = await promise;
+
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(result).toEqual(successResponse);
+
+      vi.useRealTimers();
+    });
+
+    it('should throw NETWORK_ERROR after retry also fails', async () => {
+      vi.useFakeTimers();
+
+      mockFetch
+        .mockRejectedValueOnce(new Error('Network error'))
+        .mockRejectedValueOnce(new Error('Network error again'));
+
+      const promise = analyze('data:image/jpeg;base64,test').catch((e) => e);
+      await vi.advanceTimersByTimeAsync(2000);
+      const error = await promise;
+
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(error).toBeInstanceOf(ApiError);
+      expect(error.code).toBe('NETWORK_ERROR');
+
+      vi.useRealTimers();
+    });
+
+    it('should not retry on ApiError (400/500)', async () => {
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 400,
+        json: () =>
+          Promise.resolve({
+            error: { code: 'NO_ACTIVE_SESSION', message: 'No active session' },
+          }),
+      });
+
+      const error = await analyze('data:image/jpeg;base64,test').catch((e) => e);
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+      expect(error).toBeInstanceOf(ApiError);
+      expect(error.code).toBe('NO_ACTIVE_SESSION');
+    });
+
+    it('should convert AbortError to NETWORK_ERROR', async () => {
+      vi.useFakeTimers();
+
+      const abortError = new Error('The operation was aborted');
+      abortError.name = 'AbortError';
+      mockFetch.mockRejectedValue(abortError);
+
+      const promise = analyze('data:image/jpeg;base64,test').catch((e) => e);
+      await vi.advanceTimersByTimeAsync(2000);
+      const error = await promise;
+
+      expect(error).toBeInstanceOf(ApiError);
+      expect(error.code).toBe('NETWORK_ERROR');
+      expect(error.message).toBe('Analysis request timed out');
+
+      vi.useRealTimers();
     });
   });
 

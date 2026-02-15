@@ -22,6 +22,7 @@ import type { CredentialService } from '../services/credential-service.js';
 import type { SessionIoTServices, AlexaServiceForDispatcher } from '../types/session-types.js';
 import type { AuthenticatedUser } from '../types/auth-types.js';
 import type { Result } from '../types/action-types.js';
+import { sanitizeErrorMessage } from '../config/error-utils.js';
 
 /**
  * Error type for IoT service factory
@@ -124,7 +125,7 @@ function sendAlexaAnnouncement(
     return;
   }
   alexaService.announce(alexaDevice.id, message).catch((err: unknown) => {
-    console.error('[Session] Alexa announcement failed:', err);
+    console.error('[Session] Alexa announcement failed:', err instanceof Error ? err.message : String(err));
   });
 }
 
@@ -147,7 +148,10 @@ function validateDeviceIds(
   for (const id of deviceIds) {
     const device = deviceMap.get(id);
     if (device) {
-      validDevices.push({ id: device.id, type: device.type });
+      const allowedDevice: AllowedDevice = device.signals !== undefined
+        ? { id: device.id, type: device.type, signals: device.signals }
+        : { id: device.id, type: device.type };
+      validDevices.push(allowedDevice);
     } else {
       invalidIds.push(id);
     }
@@ -344,7 +348,7 @@ export function createSessionRoutes(
         error: {
           code: 'INTERNAL_ERROR',
           message:
-            error instanceof Error ? error.message : 'Unknown error occurred',
+            sanitizeErrorMessage(error),
         },
       };
       res.status(500).json(errorResponse);
@@ -404,7 +408,7 @@ export function createSessionRoutes(
         error: {
           code: 'INTERNAL_ERROR',
           message:
-            error instanceof Error ? error.message : 'Unknown error occurred',
+            sanitizeErrorMessage(error),
         },
       };
       res.status(500).json(errorResponse);
@@ -435,7 +439,7 @@ export function createSessionRoutes(
         error: {
           code: 'INTERNAL_ERROR',
           message:
-            error instanceof Error ? error.message : 'Unknown error occurred',
+            sanitizeErrorMessage(error),
         },
       };
       res.status(500).json(errorResponse);

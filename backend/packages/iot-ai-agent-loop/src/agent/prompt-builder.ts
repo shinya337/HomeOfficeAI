@@ -4,19 +4,81 @@
  * デバイス状態を含む動的システムプロンプトを構築する純粋関数群。
  * 副作用なし。DeviceStateを引数として受け取り、文字列を返す。
  *
- * Requirements: 2.1, 2.2, 2.3, 2.4, 2.5
+ * Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 4.1, 4.2, 4.3
  */
 import type { DeviceState } from '../services/device-state-service.js';
 import type { AgentAction } from '../types/actions.js';
+
+// =============================================================================
+// Signal Resolution (package-local, mirrors SignalResolver keywords)
+// =============================================================================
+
+/** Relax-intent keywords in priority order */
+const RELAX_KEYWORDS: readonly string[] = ['安らぎ', 'くつろぎ', 'リラックス', 'おやすみ'];
+
+/** Normal-intent keywords in priority order */
+const NORMAL_KEYWORDS: readonly string[] = ['通常', '標準', 'ノーマル', '全灯'];
+
+/**
+ * Find the first signal matching any keyword in priority order (partial match).
+ */
+function findSignalByKeywords(
+  signals: readonly string[],
+  keywords: readonly string[]
+): string | null {
+  for (const keyword of keywords) {
+    const matched = signals.find((signal) => signal.includes(keyword));
+    if (matched !== undefined) {
+      return matched;
+    }
+  }
+  return null;
+}
+
+// =============================================================================
+// Dynamic Prompt Sections
+// =============================================================================
+
+/**
+ * 休憩検出時の照明アクション説明を動的に生成する
+ */
+function buildBreakLightAction(lightSignals?: readonly string[]): string {
+  if (lightSignals !== undefined && lightSignals.length > 0) {
+    const relaxSignal = findSignalByKeywords(lightSignals, RELAX_KEYWORDS);
+    if (relaxSignal !== null) {
+      return `照明を${relaxSignal}モードに切り替え`;
+    }
+  }
+  return '照明をお気に入りモードに切り替え';
+}
+
+/**
+ * 作業開始・復帰時の照明アクション説明を動的に生成する
+ */
+function buildFocusLightAction(lightSignals?: readonly string[]): string {
+  if (lightSignals !== undefined && lightSignals.length > 0) {
+    const normalSignal = findSignalByKeywords(lightSignals, NORMAL_KEYWORDS);
+    if (normalSignal !== null) {
+      return `照明を${normalSignal}モードに切り替え`;
+    }
+  }
+  return '照明を全灯（on-100）に切り替え';
+}
 
 // =============================================================================
 // Base Prompt
 // =============================================================================
 
 /**
- * 基本システムプロンプト（現在のSYSTEM_PROMPT相当）
+ * 基本システムプロンプトを動的に構築する（照明シグナル対応）
+ *
+ * @param lightSignals - ユーザーの照明カスタムシグナル名一覧（undefined/空でフォールバック）
  */
-export const BASE_PROMPT = `あなたはホームオフィスの監視AIエージェントです。
+export function buildBasePrompt(lightSignals?: readonly string[]): string {
+  const breakLightAction = buildBreakLightAction(lightSignals);
+  const focusLightAction = buildFocusLightAction(lightSignals);
+
+  return `あなたはホームオフィスの監視AIエージェントです。
 ユーザーのデスク周りの画像を分析し、ユーザーの作業状態を判断してください。
 各Toolのdescriptionに記載された判断基準に従い、適切なToolを選択してください。
 
@@ -57,7 +119,7 @@ export const BASE_PROMPT = `あなたはホームオフィスの監視AIエー�
 ## 休憩検出時のアクション
 食事中や休憩中の兆候を検出した場合、まず **continue_monitoring** で2回以上確認する。確認後 **break_mode** ツールを1つ選ぶだけでOK。
 バックエンドが以下を自動で順次実行する:
-- 照明を安らぎモードに切り替え
+- ${breakLightAction}
 - Alexaで「休憩モードに切り替えます。ごゆっくりどうぞ」とアナウンス
 - リラックスBGMを再生
 
@@ -86,9 +148,15 @@ wake_mode実行後、ユーザーが起きて作業を始めたら → **focus_m
 休憩・離席・居眠りから作業に戻ったことを検出した場合、まず **continue_monitoring** で2回以上確認する。確認後 **focus_mode** ツールを1つ選ぶだけでOK。
 **例外: セッション開始時（履歴が空でユーザーが席にいる場合）は即時 focus_mode を実行する。**
 バックエンドが以下を自動で順次実行する:
-- 照明を全灯（on-100）に切り替え
+- ${focusLightAction}
 - Alexaで「集中モードに切り替えます」とアナウンス
 - 集中できるジャズBGMを再生`;
+}
+
+/**
+ * 基本システムプロンプト（後方互換エクスポート: lightSignals なしのデフォルト版）
+ */
+export const BASE_PROMPT = buildBasePrompt();
 
 // =============================================================================
 // Formatting Helpers
@@ -193,13 +261,19 @@ ${lines.join('\n')}
  * - deviceState が提供された場合は末尾にデバイス状態セクションを追加する（Req 2.1）
  * - デバイスの状態が null の場合は「不明」として表記する
  * - recentActions が提供された場合は直近のアクション履歴を追加する
+ * - lightSignals が提供された場合はプロンプト内のシグナル名を動的に生成する（Req 4.1, 4.2, 4.3）
  *
  * @param deviceState - デバイスの現在状態（undefinedの場合は状態なし）
  * @param recentActions - 直近のアクション履歴（undefinedの場合は履歴なし）
+ * @param lightSignals - ユーザーの照明カスタムシグナル名一覧（undefinedの場合はシグナル情報なし）
  * @returns 構築されたシステムプロンプト文字列
  */
-export function buildPrompt(deviceState?: DeviceState, recentActions?: AgentAction[]): string {
-  let prompt = BASE_PROMPT;
+export function buildPrompt(
+  deviceState?: DeviceState,
+  recentActions?: AgentAction[],
+  lightSignals?: readonly string[]
+): string {
+  let prompt = buildBasePrompt(lightSignals);
 
   if (deviceState !== undefined) {
     const alexaLine = formatAlexaState(deviceState.alexa);

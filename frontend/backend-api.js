@@ -38,6 +38,9 @@ export class ApiError extends Error {
  */
 const API_BASE = '';
 
+const ANALYZE_TIMEOUT_MS = 120_000;
+const ANALYZE_RETRY_DELAY_MS = 2_000;
+
 /**
  * Default headers for JSON API requests
  */
@@ -263,34 +266,46 @@ function detectMimeType(base64) {
  * @property {AirconState|null} aircon - Aircon state
  */
 export async function analyze(base64Image) {
-  try {
-    const headers = await buildHeaders();
-    const mimeType = detectMimeType(base64Image);
+  const doFetch = async () => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), ANALYZE_TIMEOUT_MS);
 
-    const bodyObj = {
-      image: {
-        base64: base64Image,
-        mimeType: mimeType,
-      },
-    };
+    try {
+      const headers = await buildHeaders();
+      const mimeType = detectMimeType(base64Image);
+      const bodyObj = { image: { base64: base64Image, mimeType } };
+      if (currentSessionId) {
+        bodyObj.sessionId = currentSessionId;
+      }
 
-    // Include sessionId if available
-    if (currentSessionId) {
-      bodyObj.sessionId = currentSessionId;
+      const response = await fetch(`${API_BASE}/api/analyze`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(bodyObj),
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+      return handleResponse(response);
+    } catch (error) {
+      clearTimeout(timeoutId);
+      if (error instanceof ApiError) throw error;
+      if (error.name === 'AbortError') {
+        throw new ApiError('NETWORK_ERROR', 'Analysis request timed out');
+      }
+      throw new ApiError('NETWORK_ERROR', error.message);
     }
+  };
 
-    const response = await fetch(`${API_BASE}/api/analyze`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(bodyObj),
-    });
-
-    return handleResponse(response);
+  // 1回リトライ（NETWORK_ERRORのみ）
+  try {
+    return await doFetch();
   } catch (error) {
-    if (error instanceof ApiError) {
+    if (!(error instanceof ApiError) || error.code !== 'NETWORK_ERROR') {
       throw error;
     }
-    throw new ApiError('NETWORK_ERROR', error.message);
+    console.log('[API] analyze() network error, retrying in 2s...');
+    await new Promise((resolve) => setTimeout(resolve, ANALYZE_RETRY_DELAY_MS));
+    return await doFetch();
   }
 }
 
@@ -483,6 +498,58 @@ export async function deleteCredential(service) {
     const headers = await buildHeaders();
     const response = await fetch(`${API_BASE}/api/credentials/${service}`, {
       method: 'DELETE',
+      headers,
+    });
+    return handleResponse(response);
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
+    throw new ApiError('NETWORK_ERROR', error.message);
+  }
+}
+
+/**
+ * Save user preferences to Firestore
+ *
+ * Calls PUT /api/preferences with camera, voice, and selectedDevices.
+ * Requires authentication.
+ *
+ * @param {{ camera: boolean, voice: boolean, selectedDevices: Array }} preferences
+ * @returns {Promise<{ok: boolean}>} Save result
+ * @throws {ApiError} On validation error (400), auth error (401), or server error (500)
+ */
+export async function savePreferences(preferences) {
+  try {
+    const headers = await buildHeaders();
+    const response = await fetch(`${API_BASE}/api/preferences`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify(preferences),
+    });
+    return handleResponse(response);
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
+    throw new ApiError('NETWORK_ERROR', error.message);
+  }
+}
+
+/**
+ * Get user preferences from Firestore
+ *
+ * Calls GET /api/preferences.
+ * Requires authentication. Returns { preferences: null } if not yet saved.
+ *
+ * @returns {Promise<{preferences: {camera: boolean, voice: boolean, selectedDevices: Array, updatedAt: string} | null}>}
+ * @throws {ApiError} On auth error (401) or server error (500)
+ */
+export async function getPreferences() {
+  try {
+    const headers = await buildHeaders();
+    const response = await fetch(`${API_BASE}/api/preferences`, {
+      method: 'GET',
       headers,
     });
     return handleResponse(response);

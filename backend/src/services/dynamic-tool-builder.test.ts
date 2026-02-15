@@ -455,4 +455,144 @@ describe('DynamicToolBuilder - generateTools', () => {
       expect(tools1).not.toBe(tools2);
     });
   });
+
+  // =============================================================================
+  // Dynamic light_control with signals (Task 3.1)
+  // Requirements: 2.1, 2.3
+  // =============================================================================
+
+  describe('Dynamic light_control with signals (Task 3.1)', () => {
+    it('should generate light_control with custom signals in enum when LIGHT device has signals', () => {
+      const allowedDevices: AllowedDevice[] = [
+        { id: 'light-1', type: 'LIGHT', signals: ['安らぎ', '読書', '家事'] },
+      ];
+      const tools = builder.generateTools(allowedDevices);
+      const lightTool = tools.find((t) => t.name === 'light_control');
+      expect(lightTool).toBeDefined();
+      const actionProp = lightTool!.parameters!.properties['action']!;
+      // Standard buttons should be present
+      expect(actionProp.enum).toContain('on');
+      expect(actionProp.enum).toContain('off');
+      expect(actionProp.enum).toContain('on-100');
+      // Custom signals should be appended
+      expect(actionProp.enum).toContain('安らぎ');
+      expect(actionProp.enum).toContain('読書');
+      expect(actionProp.enum).toContain('家事');
+    });
+
+    it('should generate light_control with standard buttons only when LIGHT device has no signals', () => {
+      const allowedDevices: AllowedDevice[] = [
+        { id: 'light-1', type: 'LIGHT', signals: [] },
+      ];
+      const tools = builder.generateTools(allowedDevices);
+      const lightTool = tools.find((t) => t.name === 'light_control');
+      expect(lightTool).toBeDefined();
+      const actionProp = lightTool!.parameters!.properties['action']!;
+      expect(actionProp.enum).toEqual([
+        'on', 'off', 'on-100', 'on-favorite', 'night',
+        'bright-up', 'bright-down', 'colortemp-up', 'colortemp-down',
+      ]);
+    });
+
+    it('should generate light_control with standard buttons only when signals is undefined', () => {
+      const allowedDevices: AllowedDevice[] = [
+        { id: 'light-1', type: 'LIGHT' },
+      ];
+      const tools = builder.generateTools(allowedDevices);
+      const lightTool = tools.find((t) => t.name === 'light_control');
+      expect(lightTool).toBeDefined();
+      const actionProp = lightTool!.parameters!.properties['action']!;
+      expect(actionProp.enum).toEqual([
+        'on', 'off', 'on-100', 'on-favorite', 'night',
+        'bright-up', 'bright-down', 'colortemp-up', 'colortemp-down',
+      ]);
+    });
+
+    it('should include custom signal descriptions in light_control tool description', () => {
+      const allowedDevices: AllowedDevice[] = [
+        { id: 'light-1', type: 'LIGHT', signals: ['安らぎ', '読書'] },
+      ];
+      const tools = builder.generateTools(allowedDevices);
+      const lightTool = tools.find((t) => t.name === 'light_control');
+      expect(lightTool).toBeDefined();
+      expect(lightTool!.description).toContain('安らぎ: カスタムモード');
+      expect(lightTool!.description).toContain('読書: カスタムモード');
+    });
+
+    it('should not include custom signal descriptions when signals is empty', () => {
+      const allowedDevices: AllowedDevice[] = [
+        { id: 'light-1', type: 'LIGHT', signals: [] },
+      ];
+      const tools = builder.generateTools(allowedDevices);
+      const lightTool = tools.find((t) => t.name === 'light_control');
+      expect(lightTool).toBeDefined();
+      expect(lightTool!.description).not.toContain('カスタムモード');
+    });
+
+    it('should not affect AC tool when LIGHT has custom signals', () => {
+      const allowedDevices: AllowedDevice[] = [
+        { id: 'light-1', type: 'LIGHT', signals: ['安らぎ'] },
+        { id: 'ac-1', type: 'AC' },
+      ];
+      const tools = builder.generateTools(allowedDevices);
+      const acTool = tools.find((t) => t.name === 'aircon_control');
+      expect(acTool).toBeDefined();
+      expect(acTool!.name).toBe('aircon_control');
+      // AC tool should have its standard parameters unchanged
+      expect(acTool!.parameters!.properties['temperature']).toBeDefined();
+    });
+
+    it('should not affect TV tool when LIGHT has custom signals', () => {
+      const allowedDevices: AllowedDevice[] = [
+        { id: 'light-1', type: 'LIGHT', signals: ['安らぎ'] },
+        { id: 'tv-1', type: 'TV' },
+      ];
+      const tools = builder.generateTools(allowedDevices);
+      const tvTool = tools.find((t) => t.name === 'tv_control');
+      expect(tvTool).toBeDefined();
+      expect(tvTool!.name).toBe('tv_control');
+      expect(tvTool!.parameters!.properties['action']!.enum).toEqual(['power', 'channel', 'volume']);
+    });
+
+    it('should not affect ALEXA tools when LIGHT has custom signals', () => {
+      const allowedDevices: AllowedDevice[] = [
+        { id: 'light-1', type: 'LIGHT', signals: ['安らぎ'] },
+        { id: 'alexa-1', type: 'ALEXA' },
+      ];
+      const tools = builder.generateTools(allowedDevices);
+      const alexaSpeakTool = tools.find((t) => t.name === 'alexa_speak');
+      expect(alexaSpeakTool).toBeDefined();
+      expect(alexaSpeakTool!.parameters!.properties['message']).toBeDefined();
+    });
+
+    it('should use signals from first LIGHT device when multiple LIGHT devices exist', () => {
+      const allowedDevices: AllowedDevice[] = [
+        { id: 'light-1', type: 'LIGHT', signals: ['安らぎ', '読書'] },
+        { id: 'light-2', type: 'LIGHT', signals: ['くつろぎ'] },
+      ];
+      const tools = builder.generateTools(allowedDevices);
+      const lightTool = tools.find((t) => t.name === 'light_control');
+      expect(lightTool).toBeDefined();
+      const actionProp = lightTool!.parameters!.properties['action']!;
+      // Should use first LIGHT device's signals
+      expect(actionProp.enum).toContain('安らぎ');
+      expect(actionProp.enum).toContain('読書');
+      // Should NOT include second device's signals
+      expect(actionProp.enum).not.toContain('くつろぎ');
+    });
+
+    it('should generate correct enum with full standard buttons plus custom signals', () => {
+      const allowedDevices: AllowedDevice[] = [
+        { id: 'light-1', type: 'LIGHT', signals: ['安らぎ', '通常'] },
+      ];
+      const tools = builder.generateTools(allowedDevices);
+      const lightTool = tools.find((t) => t.name === 'light_control');
+      const actionProp = lightTool!.parameters!.properties['action']!;
+      expect(actionProp.enum).toEqual([
+        'on', 'off', 'on-100', 'on-favorite', 'night',
+        'bright-up', 'bright-down', 'colortemp-up', 'colortemp-down',
+        '安らぎ', '通常',
+      ]);
+    });
+  });
 });

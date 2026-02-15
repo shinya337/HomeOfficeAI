@@ -507,7 +507,7 @@ describe('Alexa Proxy Handler', () => {
         .expect(500);
 
       expect(response.body.error).toBe('INTERNAL_ERROR');
-      expect(response.body.message).toBe('サーバー内部エラーが発生しました。');
+      expect(response.body.message).toBe('string-error-not-Error-instance');
     });
 
     it('should include Error.message in 500 response for Error instances', async () => {

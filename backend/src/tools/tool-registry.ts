@@ -13,33 +13,89 @@ import type { FunctionDeclaration } from '@google-cloud/vertexai';
 import type { DeviceType } from '../types/device-types.js';
 
 // =============================================================================
+// Light Control Constants and Dynamic Builder
+// Requirements: 2.1, 2.2, 2.3, 2.4
+// =============================================================================
+
+/** 標準ボタン一覧（常に含まれる） */
+export const STANDARD_LIGHT_ACTIONS: readonly string[] = [
+  'on', 'off', 'on-100', 'on-favorite', 'night',
+  'bright-up', 'bright-down', 'colortemp-up', 'colortemp-down',
+] as const;
+
+/** 標準ボタンの操作説明（固定テキスト） */
+const STANDARD_ACTION_DESCRIPTIONS =
+  'on: 点灯, off: 消灯, on-100: 全灯（集中モード復帰に最適）, on-favorite: お気に入り, night: 常夜灯, bright-up: 明るく, bright-down: 暗く, colortemp-up: 寒色, colortemp-down: 暖色';
+
+/** light_control Tool の基本説明（固定テキスト、シグナル名を含まない） */
+const LIGHT_CONTROL_BASE_DESCRIPTION =
+  '照明を制御する。居眠り検出時: 覚醒を促すには"on"または"on-100"（OFFは逆効果）。照明がすでにONなら音声呼びかけを優先。continue_monitoringで複数回確認済みの場合のみ選択。作業復帰時: "on-100"で集中用の全灯に戻す。';
+
+/**
+ * 照明シグナル情報から動的な light_control FunctionDeclaration を生成する
+ *
+ * @param signals - ユーザーの照明カスタムシグナル名一覧（空配列可）
+ * @returns 標準ボタン + カスタムシグナルを含む FunctionDeclaration
+ *
+ * Requirements: 2.1, 2.2, 2.3, 2.4
+ */
+export function buildLightControlDeclaration(
+  signals: readonly string[]
+): FunctionDeclaration {
+  // Build enum: standard buttons + custom signals
+  const enumValues = [...STANDARD_LIGHT_ACTIONS, ...signals];
+
+  // Build action description: standard + custom signal descriptions
+  let actionDescription = `照明の操作。${STANDARD_ACTION_DESCRIPTIONS}`;
+  if (signals.length > 0) {
+    const signalDescriptions = signals
+      .map((s) => `${s}: カスタムモード`)
+      .join(', ');
+    actionDescription += `, ${signalDescriptions}`;
+  }
+
+  // Build tool description: base + custom signal info
+  let toolDescription = LIGHT_CONTROL_BASE_DESCRIPTION;
+  if (signals.length > 0) {
+    const signalDescriptions = signals
+      .map((s) => `${s}: カスタムモード`)
+      .join(', ');
+    toolDescription += ` カスタムシグナル: ${signalDescriptions}。`;
+  }
+
+  return {
+    name: 'light_control',
+    description: toolDescription,
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        action: {
+          type: SchemaType.STRING,
+          description: actionDescription,
+          enum: enumValues,
+        },
+        reason: {
+          type: SchemaType.STRING,
+          description: 'この判断に至った理由（画像から読み取った状況の説明）',
+        },
+      },
+      required: ['action', 'reason'],
+    },
+  };
+}
+
+// =============================================================================
 // Tool Declarations
 // =============================================================================
 
 /**
- * light_control Tool definition
- * Controls lighting on/off state
+ * light_control Tool definition (static, standard buttons only)
+ *
+ * This is the default declaration with no custom signals.
+ * Use buildLightControlDeclaration(signals) for dynamic generation.
  */
-export const lightControlDeclaration: FunctionDeclaration = {
-  name: 'light_control',
-  description:
-    '照明を制御する。居眠り検出時: 覚醒を促すには"on"または"on-100"（OFFは逆効果）。照明がすでにONなら音声呼びかけを優先。continue_monitoringで複数回確認済みの場合のみ選択。食事・休憩検出時: "安らぎ"でリラックスモードに切り替える。作業復帰時: "on-100"で集中用の全灯に戻す。',
-  parameters: {
-    type: SchemaType.OBJECT,
-    properties: {
-      action: {
-        type: SchemaType.STRING,
-        description: '照明の操作。on: 点灯, off: 消灯, on-100: 全灯（集中モード復帰に最適）, on-favorite: お気に入り, night: 常夜灯, bright-up: 明るく, bright-down: 暗く, colortemp-up: 寒色, colortemp-down: 暖色, 安らぎ: リラックスモード（休憩時に最適）, 読書: 読書モード, 家事: 家事モード',
-        enum: ['on', 'off', 'on-100', 'on-favorite', 'night', 'bright-up', 'bright-down', 'colortemp-up', 'colortemp-down', '安らぎ', '読書', '家事'],
-      },
-      reason: {
-        type: SchemaType.STRING,
-        description: 'この判断に至った理由（画像から読み取った状況の説明）',
-      },
-    },
-    required: ['action', 'reason'],
-  },
-};
+export const lightControlDeclaration: FunctionDeclaration =
+  buildLightControlDeclaration([]);
 
 /**
  * aircon_control Tool definition

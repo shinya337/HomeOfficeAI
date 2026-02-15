@@ -390,4 +390,104 @@ describe('ApplianceService', () => {
       }
     });
   });
+
+  describe('Signal extraction for LIGHT appliances', () => {
+    it('should extract signal names from LIGHT appliance with signals (Req 1.1)', async () => {
+      // Arrange
+      const lightWithSignals: Appliance = {
+        ...mockLightAppliance,
+        signals: [
+          { id: 'sig-1', name: '安らぎ', image: 'yasuragi.png' },
+          { id: 'sig-2', name: '通常', image: 'normal.png' },
+          { id: 'sig-3', name: '読書', image: 'reading.png' },
+        ],
+      };
+      vi.mocked(mockClient.getAppliances).mockResolvedValue({
+        success: true,
+        data: [lightWithSignals],
+      });
+
+      // Act
+      const result = await applianceService.getAppliances();
+
+      // Assert
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data[0].signals).toEqual(['安らぎ', '通常', '読書']);
+      }
+    });
+
+    it('should return empty signals array when LIGHT has no signals (Req 1.2)', async () => {
+      // Arrange: mockLightAppliance has no signals field
+      vi.mocked(mockClient.getAppliances).mockResolvedValue({
+        success: true,
+        data: [mockLightAppliance],
+      });
+
+      // Act
+      const result = await applianceService.getAppliances();
+
+      // Assert
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data[0].signals).toEqual([]);
+      }
+    });
+
+    it('should not set signals for non-LIGHT appliances', async () => {
+      // Arrange
+      vi.mocked(mockClient.getAppliances).mockResolvedValue({
+        success: true,
+        data: [mockAirconAppliance, mockTvAppliance],
+      });
+
+      // Act
+      const result = await applianceService.getAppliances();
+
+      // Assert
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data[0].signals).toBeUndefined();
+        expect(result.data[1].signals).toBeUndefined();
+      }
+    });
+
+    it('should not set signals for IR appliance even with signals field', async () => {
+      // Arrange: IR appliances have signals but they are for custom buttons, not light presets
+      vi.mocked(mockClient.getAppliances).mockResolvedValue({
+        success: true,
+        data: [mockIrAppliance],
+      });
+
+      // Act
+      const result = await applianceService.getAppliances();
+
+      // Assert
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data[0].signals).toBeUndefined();
+      }
+    });
+
+    it('should handle LIGHT with empty signals array', async () => {
+      // Arrange
+      const lightWithEmptySignals: Appliance = {
+        ...mockLightAppliance,
+        signals: [],
+      };
+      vi.mocked(mockClient.getAppliances).mockResolvedValue({
+        success: true,
+        data: [lightWithEmptySignals],
+      });
+
+      // Act
+      const result = await applianceService.getAppliances();
+
+      // Assert
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data[0].signals).toEqual([]);
+      }
+    });
+  });
 });

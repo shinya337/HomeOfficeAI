@@ -11,7 +11,7 @@ import {
   setDeviceSelectionCallback,
   restoreDeviceSelection,
 } from './device-list.js';
-import { startSession as apiStartSession, endSession as apiEndSession } from './backend-api.js';
+import { startSession as apiStartSession, endSession as apiEndSession, getDevices as apiGetDevices } from './backend-api.js';
 import { createSessionController } from './session-controller.js';
 import { createModeDisplayUI, updateModeDisplay, resetModeDisplay } from './mode-display.js';
 import {
@@ -21,7 +21,7 @@ import {
 } from './app-mode-integration.js';
 import { initAuth, _getAuthInstance } from './app-auth-integration.js';
 import { createCredentialSettings } from './credential-settings.js';
-import { saveCredential, getCredentialStatus, deleteCredential, startAlexaAuth, getAlexaAuthStatus } from './backend-api.js';
+import { saveCredential, getCredentialStatus, deleteCredential, startAlexaAuth, getAlexaAuthStatus, savePreferences, getPreferences } from './backend-api.js';
 
 // 6つの背景テーマ
 const THEMES = [
@@ -119,6 +119,16 @@ function init() {
     });
   }
 
+  // localStorage から selected_devices を復元
+  try {
+    const savedDevices = localStorage.getItem('selected_devices');
+    if (savedDevices) {
+      selectedDevices = JSON.parse(savedDevices);
+    }
+  } catch {
+    // ignore parse error
+  }
+
   // 設定UIを更新
   updateSettingsUI();
 
@@ -138,6 +148,25 @@ function init() {
           updateAvatarFromAuth(authState.user);
           if (deviceListElement) {
             fetchAndDisplayDevices(deviceListElement);
+          }
+          // ログイン時に Firestore から設定を復元
+          if (isAuthenticated) {
+            getPreferences()
+              .then((data) => {
+                if (data.preferences) {
+                  state.permissions.camera = data.preferences.camera;
+                  state.permissions.voice = data.preferences.voice;
+                  selectedDevices = data.preferences.selectedDevices || [];
+                  localStorage.setItem('permission_camera', state.permissions.camera);
+                  localStorage.setItem('permission_voice', state.permissions.voice);
+                  localStorage.setItem('selected_devices', JSON.stringify(selectedDevices));
+                  updateSettingsUI();
+                  if (deviceListElement && selectedDevices.length > 0) {
+                    restoreDeviceSelection(deviceListElement, selectedDevices);
+                  }
+                }
+              })
+              .catch((e) => console.warn('[Preferences] Firestore load failed:', e));
           }
         }
       });
@@ -255,12 +284,21 @@ async function beginSession() {
   );
 
   // Call API to start session (常にセッションを作成)
+  // デバイスキャッシュを確実に温める（サーバー再起動後の503防止）
+  if (allowedDeviceIds.length > 0) {
+    try {
+      await apiGetDevices();
+    } catch {
+      // デバイスリスト取得失敗は致命的ではない（キャッシュが既に温まっている場合もある）
+    }
+  }
+
   let sessionId = null;
   try {
-    console.log('[HomeOffice.ai] セッション開始API呼び出し... devices:', allowedDeviceIds);
+    console.log('[HomeOffice.ai] セッション開始API呼び出し...');
     const sessionData = await apiStartSession(allowedDeviceIds, deviceToolOverrides);
     sessionId = sessionData.sessionId;
-    console.log('[HomeOffice.ai] セッション開始成功:', sessionId);
+    console.log('[HomeOffice.ai] セッション開始成功');
 
     // Alexaがない場合、Web Speech APIで開始挨拶
     if (!state.alexaSpeechEnabled) {
@@ -280,7 +318,7 @@ async function beginSession() {
         if (!state.isWorking) return;
         const toolName = result.action?.tool || 'unknown';
         const message = result.result?.message || result.actionResult?.message || '';
-        console.log('[HomeOffice.ai] 分析結果:', toolName, message);
+        console.log(`[HomeOffice.ai] 分析結果: ${message}`);
         addLog('focus', `AI: ${toolName}`);
         // モード表示を更新
         handleModeUpdate(result);
@@ -433,6 +471,7 @@ async function openSettings() {
     setDeviceSelectionCallback(deviceListElement, (devices) => {
       selectedDevices = devices;
       console.log('[HomeOffice.ai] デバイス選択状態を更新:', selectedDevices);
+      persistPreferences();
     });
   }
 
@@ -502,16 +541,33 @@ function updateSettingsVisibilityForAuth(isAuthenticated) {
   }
 }
 
+/**
+ * 設定を localStorage に即時保存し、認証済みなら Firestore にも保存する（fire-and-forget）
+ */
+function persistPreferences() {
+  localStorage.setItem('permission_camera', state.permissions.camera);
+  localStorage.setItem('permission_voice', state.permissions.voice);
+  localStorage.setItem('selected_devices', JSON.stringify(selectedDevices));
+
+  const auth = _getAuthInstance();
+  if (auth && auth.getAuthState().isAuthenticated) {
+    savePreferences({
+      camera: state.permissions.camera,
+      voice: state.permissions.voice,
+      selectedDevices: selectedDevices,
+    }).catch((e) => console.warn('[Preferences] Firestore save failed:', e));
+  }
+}
+
 function togglePermission(type) {
   if (type === 'camera') {
     state.permissions.camera = !state.permissions.camera;
-    localStorage.setItem('permission_camera', state.permissions.camera);
     addLog('system', `カメラ ${state.permissions.camera ? 'ON' : 'OFF'}`);
   } else if (type === 'voice') {
     state.permissions.voice = !state.permissions.voice;
-    localStorage.setItem('permission_voice', state.permissions.voice);
     addLog('system', `音声通知 ${state.permissions.voice ? 'ON' : 'OFF'}`);
   }
+  persistPreferences();
   updateSettingsUI();
 }
 

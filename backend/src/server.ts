@@ -1,5 +1,6 @@
 import express, { Express, Request, Response } from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
 import dotenv from 'dotenv';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -34,8 +35,11 @@ import { type FirebaseServices, getFirebaseServices, resetFirebaseServices } fro
 import { createAuthMiddleware } from './middleware/auth-middleware.js';
 import { createCredentialRoutes } from './handlers/credential-handler.js';
 import { createCredentialService, type CredentialService } from './services/credential-service.js';
+import { createPreferencesRoutes } from './handlers/preferences-handler.js';
+import { createPreferencesService, type PreferencesService } from './services/preferences-service.js';
 import { createEncryptionService } from './services/encryption-service.js';
 import { loadCredentialEncryptionKey } from './config/credential-env.js';
+import { sanitizeErrorMessage } from './config/error-utils.js';
 // Alexa Proxy Auth integration (Task 3.3, Requirements: 1.5, 5.3)
 import { createAlexaProxyRoutes } from './handlers/alexa-proxy-handler.js';
 import { createAlexaReverseProxyMiddleware } from './middleware/alexa-reverse-proxy.js';
@@ -138,6 +142,7 @@ let sharedAlexaService: AlexaService | null = null;
 let alexaServiceInitPromise: Promise<AlexaService> | null = null;
 let sharedCredentialService: CredentialService | null = null;
 let sharedAlexaProxyService: AlexaProxyServiceType | null = null;
+let sharedPreferencesService: PreferencesService | null = null;
 
 /**
  * Get or create the shared session manager instance
@@ -247,7 +252,7 @@ export async function initAlexaService(): Promise<AlexaService | null> {
     );
     return sharedAlexaService;
   } catch (error) {
-    console.warn('[Server] Failed to initialize AlexaService:', error);
+    console.warn('[Server] Failed to initialize AlexaService:', error instanceof Error ? error.message : String(error));
     return null;
   }
 }
@@ -268,6 +273,7 @@ export function resetAlexaService(): void {
  */
 export function resetFirebaseIntegration(): void {
   sharedCredentialService = null;
+  sharedPreferencesService = null;
   resetFirebaseServices();
 }
 
@@ -525,6 +531,14 @@ export interface CreateAppOptions {
 export function createApp(options?: CreateAppOptions): Express {
   const app = express();
 
+  // Security headers via Helmet
+  app.use(
+    helmet({
+      contentSecurityPolicy: false,
+      crossOriginOpenerPolicy: false, // Firebase Google login requires popup communication
+    })
+  );
+
   // CORS configuration - dynamically resolved from ALLOWED_ORIGINS env var
   // Requirements: 3.4, 3.5, 6.1, 6.2, 6.3, 6.4
   app.use(
@@ -565,6 +579,12 @@ export function createApp(options?: CreateAppOptions): Express {
       app.use('/api/alexa-auth', requireAuth, createAlexaProxyRoutes({ alexaProxyService }));
     }
 
+    // Register preferences routes (user settings persistence)
+    if (sharedPreferencesService === null) {
+      sharedPreferencesService = createPreferencesService({ firestore: firebaseServices.firestore });
+    }
+    app.use('/api/preferences', requireAuth, createPreferencesRoutes({ preferencesService: sharedPreferencesService }));
+
     console.log('[Server] Firebase Auth middleware enabled on /api routes');
   } else {
     console.warn(
@@ -590,6 +610,43 @@ export function createApp(options?: CreateAppOptions): Express {
   const deviceCache = getDeviceCache();
   const sessionCredentialService = options?.credentialService ?? (firebaseServices !== null ? getOrCreateCredentialService(firebaseServices) : null);
 
+  // IoTServiceFactory: creates user-specific Nature Remo services from token
+  const iotServiceFactory = sessionCredentialService !== null
+    ? async (token: string): Promise<Result<import('./types/session-types.js').SessionIoTServices, { code: 'INVALID_TOKEN' | 'SERVICE_ERROR'; message: string }>> => {
+        try {
+          const rateLimitMonitor = createRateLimitMonitor();
+          const userNatureRemoClient = createNatureRemoClient(token, rateLimitMonitor);
+          const userLightService = createLightService(userNatureRemoClient);
+          const userAirconService = createAirconService(userNatureRemoClient);
+          const airconAdapter: import('./dispatcher/action-dispatcher.js').AirconService = {
+            async setTemperature(applianceId: string, temperature: number, mode?: string) {
+              const settings: { temperature?: string; operation_mode?: string } = {
+                temperature: String(temperature),
+              };
+              if (mode) {
+                settings.operation_mode = mode;
+              }
+              const result = await userAirconService.updateSettings(applianceId, settings);
+              if (result.success) {
+                return { success: true as const, data: { applianceId, temperature } };
+              }
+              return result;
+            },
+            async powerOff(applianceId: string) {
+              const result = await userAirconService.updateSettings(applianceId, { button: 'power-off' });
+              if (result.success) {
+                return { success: true as const, data: { applianceId } };
+              }
+              return result;
+            },
+          };
+          return { ok: true as const, value: { lightService: userLightService, airconService: airconAdapter, alexaService: undefined } };
+        } catch (error) {
+          return { ok: false as const, error: { code: 'SERVICE_ERROR' as const, message: error instanceof Error ? error.message : 'Failed to create IoT services' } };
+        }
+      }
+    : undefined;
+
   // AlexaServiceFactory: creates AlexaServiceForDispatcher from cookie JSON
   // Task 4.3, Requirements: 4.1, 4.4
   const alexaServiceFactory = sessionCredentialService !== null
@@ -604,7 +661,7 @@ export function createApp(options?: CreateAppOptions): Express {
           });
           return { ok: true as const, value: tempAlexaService };
         } catch (error) {
-          console.error('[Server] Failed to create AlexaService from cookie:', error);
+          console.error('[Server] Failed to create AlexaService from cookie:', error instanceof Error ? error.message : String(error));
           return { ok: false as const, error: { code: 'SERVICE_ERROR' as const, message: error instanceof Error ? error.message : 'Failed to create AlexaService' } };
         } finally {
           try {
@@ -622,6 +679,7 @@ export function createApp(options?: CreateAppOptions): Express {
     sessionManager,
     getCachedDevices: () => deviceCache.get(),
     ...(sessionCredentialService !== null ? { credentialService: sessionCredentialService } : {}),
+    ...(iotServiceFactory !== undefined ? { iotServiceFactory } : {}),
     ...(alexaServiceFactory !== undefined ? { alexaServiceFactory } : {}),
   }));
 
@@ -678,7 +736,7 @@ export function createApp(options?: CreateAppOptions): Express {
       return await fetchAlexaDevicesFromCookie(alexaCookieResult.value, uid);
     } catch (error) {
       // Any unexpected error -> log and continue without Alexa devices (Req 3.4)
-      console.error(`[Server] User Alexa device fetch error for ${uid}:`, error);
+      console.error(`[Server] User Alexa device fetch error for ${uid}:`, error instanceof Error ? error.message : String(error));
       return [];
     }
   }
@@ -720,7 +778,7 @@ export function createApp(options?: CreateAppOptions): Express {
       console.error(`[Server] User AlexaService getDevices failed for ${uid}: ${devicesResult.error.message}`);
       return [];
     } catch (error) {
-      console.error(`[Server] Failed to create user AlexaService for ${uid}:`, error);
+      console.error(`[Server] Failed to create user AlexaService for ${uid}:`, error instanceof Error ? error.message : String(error));
       return [];
     } finally {
       // Clean up temp file
@@ -850,11 +908,11 @@ export function createApp(options?: CreateAppOptions): Express {
           // No global token and user has no saved token -> empty list
           res.json({ devices: [] });
         } catch (error) {
-          console.error('[Server] Device fetch error:', error);
+          console.error('[Server] Device fetch error:', error instanceof Error ? error.message : String(error));
           res.status(500).json({
             error: {
               code: 'INTERNAL_ERROR',
-              message: error instanceof Error ? error.message : 'Unknown error occurred',
+              message: sanitizeErrorMessage(error),
             },
           });
         }

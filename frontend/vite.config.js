@@ -19,6 +19,9 @@ export default {
       },
     },
   },
+  build: {
+    sourcemap: false,
+  },
   optimizeDeps: {
     include: ['firebase/app', 'firebase/auth'],
   },

@@ -27,7 +27,7 @@ function createTestConfig(overrides?: Partial<AgentClientConfig>): AgentClientCo
   return {
     projectId: 'test-project',
     location: 'us-central1',
-    model: 'gemini-2.0-flash',
+    model: 'gemini-2.5-flash',
     ...overrides,
   };
 }
@@ -134,6 +134,13 @@ describe('AgentClient', () => {
       // システムプロンプトが含まれている（systemInstruction または contents内）
       // 画像データがinlineDataとして含まれている
       expect(callArgs).toBeDefined();
+
+      // thinkingConfig が設定されている（Gemini 2.5 Flash の思考予算制限）
+      expect(callArgs.generationConfig).toEqual({
+        thinkingConfig: {
+          thinkingBudget: 2048,
+        },
+      });
     });
 
     it('画像のBase64データとMIMEタイプがリクエストに含まれる (Req 2.1)', async () => {

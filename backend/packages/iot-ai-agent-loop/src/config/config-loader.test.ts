@@ -52,7 +52,7 @@ describe('ConfigLoader - loadAgentConfig', () => {
       if (result.ok) {
         expect(result.value.projectId).toBe('my-project');
         expect(result.value.location).toBe('us-central1');
-        expect(result.value.model).toBe('gemini-2.0-flash');
+        expect(result.value.model).toBe('gemini-2.5-flash');
         expect(result.value.natureRemoToken).toBe('test-token');
       }
     });
@@ -72,11 +72,11 @@ describe('ConfigLoader - loadAgentConfig', () => {
       }
     });
 
-    it('GEMINI_MODELのデフォルト値はgemini-2.0-flash', () => {
+    it('GEMINI_MODELのデフォルト値はgemini-2.5-flash', () => {
       const result = loadAgentConfig();
       expect(result.ok).toBe(true);
       if (result.ok) {
-        expect(result.value.model).toBe('gemini-2.0-flash');
+        expect(result.value.model).toBe('gemini-2.5-flash');
       }
     });
 

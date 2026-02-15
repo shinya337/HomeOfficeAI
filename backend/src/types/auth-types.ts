@@ -90,3 +90,35 @@ export type EncryptionError =
   | { readonly code: 'ENCRYPTION_FAILED'; readonly message: string }
   | { readonly code: 'DECRYPTION_FAILED'; readonly message: string }
   | { readonly code: 'INVALID_KEY'; readonly message: string };
+
+// =============================================================================
+// User Preferences Types
+// =============================================================================
+
+/**
+ * A device selected by the user in the settings UI.
+ */
+export interface SelectedDevice {
+  readonly id: string;
+  readonly name?: string;
+  readonly type: string;
+  readonly allowedTools?: readonly string[];
+}
+
+/**
+ * User preferences stored in Firestore.
+ * Path: users/{uid}/preferences/settings
+ */
+export interface UserPreferences {
+  readonly camera: boolean;
+  readonly voice: boolean;
+  readonly selectedDevices: readonly SelectedDevice[];
+  readonly updatedAt: string;
+}
+
+/**
+ * Error type for preferences service operations.
+ * Discriminated by the `code` field.
+ */
+export type PreferencesError =
+  | { readonly code: 'FIRESTORE_ERROR'; readonly message: string };

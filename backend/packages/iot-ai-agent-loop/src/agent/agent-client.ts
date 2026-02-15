@@ -85,6 +85,12 @@ export interface AgentClientService {
 // Constants
 // =============================================================================
 
+/** Gemini 2.5 Flash thinking budget (tokens) — Function Calling用に制限 */
+const THINKING_BUDGET = 2048;
+
+/** generateContent タイムアウト (ms) — Gemini APIハング時の早期打ち切り */
+const GENERATE_TIMEOUT_MS = 30_000;
+
 /** 認証エラーコード */
 const AUTH_ERROR_CODES = new Set([
   'UNAUTHENTICATED',
@@ -199,6 +205,11 @@ export function createAgentClient(
               ],
             },
           ],
+          generationConfig: {
+            thinkingConfig: {
+              thinkingBudget: THINKING_BUDGET,
+            },
+          },
         };
 
         // 動的ツールが渡された場合、per-requestでtools+toolConfigを設定 (Req 4.2)
@@ -209,7 +220,16 @@ export function createAgentClient(
           };
         }
 
-        const response = await generativeModel.generateContent(request);
+        const response = await Promise.race([
+          generativeModel.generateContent(request),
+          new Promise<never>((_, reject) => {
+            setTimeout(() => {
+              const err = new Error('Gemini API request timed out');
+              err.name = 'AbortError';
+              reject(err);
+            }, GENERATE_TIMEOUT_MS);
+          }),
+        ]);
 
         // レスポンスから全FunctionCallを抽出（並列Function Calling対応）(Req 2.3)
         const parseResult = parseFunctionCallResponse(response.response);

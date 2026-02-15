@@ -15,6 +15,7 @@
 import { Router, type Request, type Response } from 'express';
 import type { CredentialService } from '../services/credential-service.js';
 import type { AuthenticatedUser } from '../types/auth-types.js';
+import { sanitizeErrorMessage } from '../config/error-utils.js';
 
 // =============================================================================
 // Types
@@ -118,7 +119,7 @@ export function createCredentialRoutes(
       res.status(500).json({
         error: 'INTERNAL_ERROR',
         message:
-          error instanceof Error ? error.message : 'サーバー内部エラーが発生しました。',
+          sanitizeErrorMessage(error),
       });
     }
   });
@@ -148,7 +149,7 @@ export function createCredentialRoutes(
       res.status(500).json({
         error: 'INTERNAL_ERROR',
         message:
-          error instanceof Error ? error.message : 'サーバー内部エラーが発生しました。',
+          sanitizeErrorMessage(error),
       });
     }
   });
@@ -178,7 +179,7 @@ export function createCredentialRoutes(
       res.status(500).json({
         error: 'INTERNAL_ERROR',
         message:
-          error instanceof Error ? error.message : 'サーバー内部エラーが発生しました。',
+          sanitizeErrorMessage(error),
       });
     }
   });

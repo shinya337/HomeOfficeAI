@@ -14,6 +14,7 @@ import {
   getAlwaysIncludedTools,
   getAllDeviceTypes,
   getAlexaTools,
+  buildLightControlDeclaration,
 } from '../tools/tool-registry.js';
 
 /**
@@ -70,6 +71,22 @@ export function createDynamicToolBuilder(): DynamicToolBuilderService {
         }
       }
 
+      // Extract signals from the first LIGHT device (for dynamic light_control generation)
+      const lightSignals: readonly string[] =
+        allowedDevices !== undefined
+          ? (allowedDevices.find((d) => d.type === 'LIGHT')?.signals ?? [])
+          : [];
+
+      // Helper: add a tool if allowed by per-device tool filtering
+      const addIfAllowed = (
+        tool: FunctionDeclaration,
+        allowedTools: readonly string[] | undefined
+      ): void => {
+        if (allowedTools === undefined || allowedTools.includes(tool.name)) {
+          tools.push(tool);
+        }
+      };
+
       // Add tools for allowed device types
       for (const deviceType of deviceTypesToInclude) {
         const deviceAllowedTools = allowedToolsByType.get(deviceType);
@@ -81,16 +98,14 @@ export function createDynamicToolBuilder(): DynamicToolBuilderService {
           } else {
             tools.push(...alexaTools);
           }
+        } else if (deviceType === 'LIGHT') {
+          // Dynamic light_control: use buildLightControlDeclaration with user's signals
+          const tool = buildLightControlDeclaration(lightSignals);
+          addIfAllowed(tool, deviceAllowedTools);
         } else {
           const tool = getToolForDeviceType(deviceType);
           if (tool !== undefined) {
-            if (deviceAllowedTools !== undefined) {
-              if (deviceAllowedTools.includes(tool.name)) {
-                tools.push(tool);
-              }
-            } else {
-              tools.push(tool);
-            }
+            addIfAllowed(tool, deviceAllowedTools);
           }
         }
       }

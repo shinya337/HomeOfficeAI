@@ -11,7 +11,7 @@
  *
  * Optional environment variables:
  * - VERTEX_AI_LOCATION: Vertex AI region (default: us-central1)
- * - GEMINI_MODEL: Gemini model name (default: gemini-2.0-flash)
+ * - GEMINI_MODEL: Gemini model name (default: gemini-2.5-flash)
  *
  * Note: LIGHT_APPLIANCE_ID and AIRCON_APPLIANCE_ID have been removed.
  * Device IDs are now dynamically obtained from session's allowedDevices.
@@ -70,7 +70,7 @@ export interface IntegrationConfigError {
 const DEFAULT_LOCATION = 'us-central1';
 
 /** Default Gemini model name */
-const DEFAULT_MODEL = 'gemini-2.0-flash';
+const DEFAULT_MODEL = 'gemini-2.5-flash';
 
 // =============================================================================
 // Validation helpers

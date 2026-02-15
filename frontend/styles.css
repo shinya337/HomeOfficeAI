@@ -898,11 +898,9 @@ body {
 .mode-display-reason {
   font-size: 0.7rem;
   color: rgba(255, 255, 255, 0.6);
-  margin-top: 2px;
-  max-width: 200px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  margin-top: 4px;
+  max-width: 260px;
+  line-height: 1.4;
 }
 
 /* タイマー表示 */
