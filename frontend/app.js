@@ -11,7 +11,7 @@ import {
   setDeviceSelectionCallback,
   restoreDeviceSelection,
 } from './device-list.js';
-import { startSession as apiStartSession, endSession as apiEndSession } from './backend-api.js';
+import { startSession as apiStartSession, endSession as apiEndSession, getDevices as apiGetDevices } from './backend-api.js';
 import { createSessionController } from './session-controller.js';
 import { createModeDisplayUI, updateModeDisplay, resetModeDisplay } from './mode-display.js';
 import {
@@ -284,6 +284,15 @@ async function beginSession() {
   );
 
   // Call API to start session (常にセッションを作成)
+  // デバイスキャッシュを確実に温める（サーバー再起動後の503防止）
+  if (allowedDeviceIds.length > 0) {
+    try {
+      await apiGetDevices();
+    } catch {
+      // デバイスリスト取得失敗は致命的ではない（キャッシュが既に温まっている場合もある）
+    }
+  }
+
   let sessionId = null;
   try {
     console.log('[HomeOffice.ai] セッション開始API呼び出し... devices:', allowedDeviceIds);
