@@ -119,7 +119,7 @@ flowchart TB
 
 ### 前提条件
 
-- **Node.js 20+**
+- **Node.js 22+**
 - **Google Cloud CLI** -- `gcloud auth application-default login` で認証済みであること
 - **Nature Remo API トークン** -- [home.nature.global](https://home.nature.global/) から取得
 - **Alexa Cookie**（任意） -- Amazon Echo の音声制御を使用する場合に必要

@@ -59,8 +59,8 @@ describe('ルートREADME.mdの本番プロジェクト向け整備 (Req 5.1-5.6
       expect(content).toMatch(/#{2,3}\s*前提条件/);
     });
 
-    it('Node.js 20+ の記載があること', () => {
-      expect(content).toMatch(/Node\.js\s*20/);
+    it('Node.js 22+ の記載があること', () => {
+      expect(content).toMatch(/Node\.js\s*22/);
     });
 
     it('Google Cloud CLI の記載があること', () => {

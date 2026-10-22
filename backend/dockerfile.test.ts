@@ -11,9 +11,9 @@ describe('Dockerfile', () => {
     expect(existsSync(DOCKERFILE_PATH)).toBe(true);
   });
 
-  it('Node.js 20 Alpineベースイメージを使用する', () => {
+  it('Node.js 22 Alpineベースイメージを使用する', () => {
     const content = readFileSync(DOCKERFILE_PATH, 'utf-8');
-    expect(content).toMatch(/FROM\s+node:20[^\s]*alpine/);
+    expect(content).toMatch(/FROM\s+node:22[^\s]*alpine/);
   });
 
   it('3ステージのマルチステージビルドを使用する', () => {
@@ -69,7 +69,7 @@ describe('Dockerfile', () => {
   it('フロントエンドビルドステージで.env.productionからFirebase設定を読む', () => {
     const content = readFileSync(DOCKERFILE_PATH, 'utf-8');
     // frontend-buildステージでソースをコピーし、npm run buildで.env.productionを参照
-    const frontendStage = content.split(/FROM\s+node:20[^\n]*AS\s+backend-build/)[0] ?? '';
+    const frontendStage = content.split(/FROM\s+node:22[^\n]*AS\s+backend-build/)[0] ?? '';
     expect(frontendStage).toMatch(/COPY\s+frontend\/\s+\.\//);
     expect(frontendStage).toMatch(/npm run build/);
   });
