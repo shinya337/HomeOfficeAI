@@ -9,7 +9,7 @@
 # ---------------------------------------------------------------------------
 # Stage 1: Frontend Build
 # ---------------------------------------------------------------------------
-FROM node:20-alpine AS frontend-build
+FROM node:22-alpine AS frontend-build
 
 WORKDIR /app/frontend
 
@@ -26,7 +26,7 @@ RUN npm run build
 # ---------------------------------------------------------------------------
 # Stage 2: Backend Build (TypeScript compile)
 # ---------------------------------------------------------------------------
-FROM node:20-alpine AS backend-build
+FROM node:22-alpine AS backend-build
 
 WORKDIR /app/backend
 
@@ -52,7 +52,7 @@ RUN npx tsc -p tsconfig.build.json || true
 # ---------------------------------------------------------------------------
 # Stage 3: Production Runtime
 # ---------------------------------------------------------------------------
-FROM node:20-alpine AS production
+FROM node:22-alpine AS production
 
 WORKDIR /app
 

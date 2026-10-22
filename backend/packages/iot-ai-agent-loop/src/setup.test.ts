@@ -30,8 +30,8 @@ describe('プロジェクト基盤セットアップ', () => {
       expect(pkg.dependencies['@google-cloud/vertexai']).toBeDefined();
     });
 
-    it('Node.js 20+が要求されること', () => {
-      expect(pkg.engines.node).toBe('>=20.0.0');
+    it('Node.js 22+が要求されること', () => {
+      expect(pkg.engines.node).toBe('>=22.0.0');
     });
 
     it('devDependenciesにTypeScript, tsx, vitestが含まれること', () => {

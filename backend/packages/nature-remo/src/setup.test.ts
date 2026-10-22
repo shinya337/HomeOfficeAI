@@ -22,11 +22,11 @@ describe('TypeScript Project Setup', () => {
       expect(packageJson.devDependencies).toHaveProperty('tsx');
     });
 
-    it('should require Node.js 20+', () => {
+    it('should require Node.js 22+', () => {
       const packageJson = JSON.parse(
         readFileSync(resolve(projectRoot, 'package.json'), 'utf-8')
       );
-      expect(packageJson.engines?.node).toMatch(/>=\s*20/);
+      expect(packageJson.engines?.node).toMatch(/>=\s*22/);
     });
   });
 
